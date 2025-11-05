@@ -1,7 +1,42 @@
 import Foundation
+import AppKit
 
 class AnalyticsService: ObservableObject {
     static let shared = AnalyticsService()
+
+    // Helper function to compress image to 1080p max
+    private func compressImage(_ imageData: Data) -> Data? {
+        guard let image = NSImage(data: imageData) else { return nil }
+
+        let maxDimension: CGFloat = 1920 // 1080p width
+        let currentSize = image.size
+
+        // Calculate new size maintaining aspect ratio
+        var newSize = currentSize
+        if currentSize.width > maxDimension || currentSize.height > maxDimension {
+            let ratio = currentSize.width / currentSize.height
+            if currentSize.width > currentSize.height {
+                newSize = CGSize(width: maxDimension, height: maxDimension / ratio)
+            } else {
+                newSize = CGSize(width: maxDimension * ratio, height: maxDimension)
+            }
+        }
+
+        // Create compressed image
+        let newImage = NSImage(size: newSize)
+        newImage.lockFocus()
+        image.draw(in: NSRect(origin: .zero, size: newSize))
+        newImage.unlockFocus()
+
+        // Convert to JPEG data with 70% quality for better compression
+        guard let tiffData = newImage.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let jpegData = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.7]) else {
+            return imageData // Return original if compression fails
+        }
+
+        return jpegData
+    }
 
     private let userDefaults = UserDefaults.standard
     private let apiKeyKey = "LLMAPIKey"
@@ -57,7 +92,7 @@ class AnalyticsService: ObservableObject {
     }
 
     /// Analyze a session folder with batch processing
-    func analyzeSession(sessionPath: URL, progressCallback: @escaping (Double) -> Void, logCallback: @escaping (String) -> Void) async throws -> [AppUsageEntry] {
+    func analyzeSession(sessionPath: URL, sendAllScreenshots: Bool = false, progressCallback: @escaping (Double) -> Void, logCallback: @escaping (String) -> Void) async throws -> [AppUsageEntry] {
         logCallback("Scanning session folder...")
 
         // Load all metadata files
@@ -88,10 +123,12 @@ class AnalyticsService: ObservableObject {
             var batchData: [(before: Data?, after: Data?, metadata: ClickEvent)] = []
 
             for metadataFile in batch {
-                guard let metadataData = try? Data(contentsOf: metadataFile),
-                      let metadata = try? JSONDecoder().decode(ClickEvent.self, from: metadataData) else {
-                    continue
-                }
+                logCallback("Loading metadata: \(metadataFile.lastPathComponent)")
+                let metadataData = try Data(contentsOf: metadataFile)
+
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                let metadata = try decoder.decode(ClickEvent.self, from: metadataData)
 
                 let timestamp = metadataFile.lastPathComponent
                     .replacingOccurrences(of: "_metadata.json", with: "")
@@ -99,8 +136,8 @@ class AnalyticsService: ObservableObject {
                 let beforePath = sessionPath.appendingPathComponent("\(timestamp)_before.png")
                 let afterPath = sessionPath.appendingPathComponent("\(timestamp)_after.png")
 
-                let beforeData = try? Data(contentsOf: beforePath)
-                let afterData = try? Data(contentsOf: afterPath)
+                let beforeData = try Data(contentsOf: beforePath)
+                let afterData = try Data(contentsOf: afterPath)
 
                 batchData.append((before: beforeData, after: afterData, metadata: metadata))
             }
@@ -109,17 +146,32 @@ class AnalyticsService: ObservableObject {
 
             // Analyze this batch
             logCallback("Calling LLM API for batch \(index + 1)...")
-            let batchResult = try await analyzeBatch(batchData: batchData, batchNumber: index + 1, totalBatches: batches.count, logCallback: logCallback)
+            let batchResult = try await analyzeBatch(batchData: batchData, batchNumber: index + 1, totalBatches: batches.count, sendAllScreenshots: sendAllScreenshots, logCallback: logCallback)
             allResults.append(contentsOf: batchResult.apps)
 
             logCallback("Batch \(index + 1) complete. Found \(batchResult.apps.count) app(s)")
+            for (idx, app) in batchResult.apps.prefix(5).enumerated() {
+                logCallback("  \(idx + 1). \(app.appName): \(String(format: "%.1f", app.minutesUsed)) min")
+            }
+            if batchResult.apps.count > 5 {
+                logCallback("  ... and \(batchResult.apps.count - 5) more")
+            }
 
             // Update progress
             progressCallback(Double(index + 1) / Double(batches.count))
         }
 
         // Aggregate results by app name
-        return aggregateAppUsage(allResults)
+        logCallback("Aggregating results from \(allResults.count) entries...")
+        let aggregated = aggregateAppUsage(allResults)
+        logCallback("Final aggregated results: \(aggregated.count) unique apps")
+        for (idx, app) in aggregated.prefix(5).enumerated() {
+            logCallback("  \(idx + 1). \(app.appName): \(String(format: "%.1f", app.minutesUsed)) min")
+        }
+        if aggregated.count > 5 {
+            logCallback("  ... and \(aggregated.count - 5) more")
+        }
+        return aggregated
     }
 
     /// Get the effective API key for the current provider
@@ -341,7 +393,7 @@ struct OpenAIMessage: Codable {
 }
 
 extension AnalyticsService {
-    private func analyzeBatch(batchData: [(before: Data?, after: Data?, metadata: ClickEvent)], batchNumber: Int, totalBatches: Int, logCallback: @escaping (String) -> Void) async throws -> AppUsageAnalysis {
+    private func analyzeBatch(batchData: [(before: Data?, after: Data?, metadata: ClickEvent)], batchNumber: Int, totalBatches: Int, sendAllScreenshots: Bool, logCallback: @escaping (String) -> Void) async throws -> AppUsageAnalysis {
         // Get API key
         guard let apiKey = getEffectiveApiKey(), !apiKey.isEmpty else {
             logCallback("ERROR: No API key available")
@@ -356,38 +408,51 @@ extension AnalyticsService {
         logCallback("Building prompt for batch \(batchNumber)...")
 
         // Build prompt with structured output request
-        let prompt = buildBatchAnalysisPrompt(batchData: batchData, batchNumber: batchNumber, totalBatches: totalBatches)
+        let prompt = buildBatchAnalysisPrompt(batchData: batchData, batchNumber: batchNumber, totalBatches: totalBatches, sendAllScreenshots: sendAllScreenshots)
 
         logCallback("Prompt size: \(prompt.count) characters")
-        logCallback("Prompt preview (first 500 chars):")
-        logCallback(String(prompt.prefix(500)))
+        logCallback("=== FULL PROMPT ===")
+        logCallback(prompt)
+        logCallback("=== END PROMPT ===")
         logCallback("Making API request to \(apiProvider.rawValue)...")
 
-        // Call LLM with structured output
-        let result = try await queryLLMWithStructuredOutput(prompt: prompt, model: model, apiKey: apiKey, logCallback: logCallback)
+        // Call LLM with structured output (including screenshots)
+        let result = try await queryLLMWithStructuredOutput(prompt: prompt, batchData: batchData, sendAllScreenshots: sendAllScreenshots, model: model, apiKey: apiKey, logCallback: logCallback)
 
         logCallback("API response received successfully")
 
         return result
     }
 
-    private func buildBatchAnalysisPrompt(batchData: [(before: Data?, after: Data?, metadata: ClickEvent)], batchNumber: Int, totalBatches: Int) -> String {
+    private func buildBatchAnalysisPrompt(batchData: [(before: Data?, after: Data?, metadata: ClickEvent)], batchNumber: Int, totalBatches: Int, sendAllScreenshots: Bool) -> String {
         var prompt = """
         You are analyzing user productivity data from screen captures and interaction metadata.
 
-        This is batch \(batchNumber) of \(totalBatches). Each batch contains up to 10 click events with before/after screenshots and metadata.
+        This is batch \(batchNumber) of \(totalBatches). Each batch contains up to 10 click events with screenshots and metadata.
 
         For each event, I'm providing:
+        - \(sendAllScreenshots ? "Before and after screenshots" : "Before-click screenshots") (images attached below)
         - The active application name
-        - Timestamp
+        - Timestamp (both human-readable and Unix timestamp in seconds)
         - Clicked UI element details
-        - Time between events (approximate)
+        - Time between events
 
-        Your task: Estimate how many MINUTES the user spent in each application during this batch.
+        Your task: Estimate how many SECONDS the user spent in each application during this batch.
         Base your estimate on:
         1. Which app was active in each event
-        2. Time gaps between consecutive events
-        3. Context from the metadata
+        2. Time gaps between consecutive events (calculate using Unix timestamps)
+        3. Context from the metadata AND screenshots (what the user was actually doing)
+
+        IMPORTANT: For browsers (Safari, Chrome, Firefox, etc.), look at the screenshots to identify the top-level domain/website being used.
+        Instead of reporting time as "Safari" or "Google Chrome", report it by the website domain.
+        For example:
+        - If the user is on YouTube in Chrome, report it as "youtube" (not "Google Chrome")
+        - If the user is on GitHub in Safari, report it as "github" (not "Safari")
+        - If the user is on reddit.com, report it as "reddit"
+        Use the visible URL bar, page title, or recognizable website UI in the screenshots to identify the domain.
+
+        Look at the screenshots to understand what the user was doing in each application.
+        \(sendAllScreenshots ? "Compare before/after screenshots to see what changed." : "Use the before-click screenshots to see what the user was working on.")
 
         Events in this batch:
 
@@ -395,19 +460,20 @@ extension AnalyticsService {
 
         for (index, data) in batchData.enumerated() {
             let metadata = data.metadata
+            let unixTimestamp = Int(metadata.timestamp.timeIntervalSince1970)
 
             // Calculate time since previous event
             var timeSincePrevious = ""
             if index > 0 {
                 let prevMetadata = batchData[index - 1].metadata
                 let timeDiff = metadata.timestamp.timeIntervalSince(prevMetadata.timestamp)
-                timeSincePrevious = String(format: " (%.1f seconds since previous)", timeDiff)
+                timeSincePrevious = String(format: " (%.0f seconds since previous)", timeDiff)
             }
 
             prompt += """
 
             Event \(index + 1)\(timeSincePrevious):
-            - Time: \(metadata.timestamp.formatted())
+            - Time: \(metadata.timestamp.formatted()) (Unix: \(unixTimestamp))
             - Active App: \(metadata.activeApp.name) (bundle: \(metadata.activeApp.bundleIdentifier ?? "unknown"))
             - Mouse Position: (\(Int(metadata.mousePosition.x)), \(Int(metadata.mousePosition.y)))
             """
@@ -433,24 +499,25 @@ extension AnalyticsService {
 
         Provide your analysis as a JSON array of app usage entries. Each entry should have:
         - appName: The application name
-        - minutesUsed: Estimated minutes spent (can be fractional, e.g., 2.5)
+        - secondsUsed: Estimated seconds spent (integer, e.g., 150 for 2.5 minutes)
 
         Only include apps that were actively used. Combine time for the same app across multiple events.
+        Use the Unix timestamps to calculate accurate durations.
         """
 
         return prompt
     }
 
-    private func queryLLMWithStructuredOutput(prompt: String, model: String, apiKey: String, logCallback: @escaping (String) -> Void) async throws -> AppUsageAnalysis {
+    private func queryLLMWithStructuredOutput(prompt: String, batchData: [(before: Data?, after: Data?, metadata: ClickEvent)], sendAllScreenshots: Bool, model: String, apiKey: String, logCallback: @escaping (String) -> Void) async throws -> AppUsageAnalysis {
         switch apiProvider {
         case .openai:
-            return try await queryOpenAIStructured(prompt: prompt, model: model, apiKey: apiKey, logCallback: logCallback)
+            return try await queryOpenAIStructured(prompt: prompt, batchData: batchData, sendAllScreenshots: sendAllScreenshots, model: model, apiKey: apiKey, logCallback: logCallback)
         case .huggingface:
-            return try await queryHuggingFaceStructured(prompt: prompt, model: model, apiKey: apiKey, logCallback: logCallback)
+            return try await queryHuggingFaceStructured(prompt: prompt, batchData: batchData, sendAllScreenshots: sendAllScreenshots, model: model, apiKey: apiKey, logCallback: logCallback)
         }
     }
 
-    private func queryOpenAIStructured(prompt: String, model: String, apiKey: String, logCallback: @escaping (String) -> Void) async throws -> AppUsageAnalysis {
+    private func queryOpenAIStructured(prompt: String, batchData: [(before: Data?, after: Data?, metadata: ClickEvent)], sendAllScreenshots: Bool, model: String, apiKey: String, logCallback: @escaping (String) -> Void) async throws -> AppUsageAnalysis {
         let url = URL(string: "https://api.openai.com/v1/chat/completions")!
         logCallback("Request URL: \(url)")
         logCallback("Model: \(model)")
@@ -459,6 +526,44 @@ extension AnalyticsService {
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        // Build message content with text and images
+        var contentArray: [[String: Any]] = [
+            ["type": "text", "text": prompt]
+        ]
+
+        // Add screenshots as base64 images (compressed to 1080p)
+        for (index, data) in batchData.enumerated() {
+            // Always send before screenshot (compressed)
+            if let beforeData = data.before,
+               let compressedData = compressImage(beforeData) {
+                let base64 = compressedData.base64EncodedString()
+                let originalSize = Double(beforeData.count) / 1024 / 1024
+                let compressedSize = Double(compressedData.count) / 1024 / 1024
+                contentArray.append([
+                    "type": "image_url",
+                    "image_url": [
+                        "url": "data:image/jpeg;base64,\(base64)"
+                    ]
+                ])
+                logCallback("Added before screenshot for event \(index + 1) (\(String(format: "%.2f", originalSize))MB → \(String(format: "%.2f", compressedSize))MB)")
+            }
+
+            // Only send after screenshot if requested
+            if sendAllScreenshots, let afterData = data.after,
+               let compressedData = compressImage(afterData) {
+                let base64 = compressedData.base64EncodedString()
+                let originalSize = Double(afterData.count) / 1024 / 1024
+                let compressedSize = Double(compressedData.count) / 1024 / 1024
+                contentArray.append([
+                    "type": "image_url",
+                    "image_url": [
+                        "url": "data:image/jpeg;base64,\(base64)"
+                    ]
+                ])
+                logCallback("Added after screenshot for event \(index + 1) (\(String(format: "%.2f", originalSize))MB → \(String(format: "%.2f", compressedSize))MB)")
+            }
+        }
 
         let schema: [String: Any] = [
             "type": "object",
@@ -469,9 +574,9 @@ extension AnalyticsService {
                         "type": "object",
                         "properties": [
                             "appName": ["type": "string"],
-                            "minutesUsed": ["type": "number"]
+                            "secondsUsed": ["type": "number"]
                         ],
-                        "required": ["appName", "minutesUsed"],
+                        "required": ["appName", "secondsUsed"],
                         "additionalProperties": false
                     ]
                 ]
@@ -484,7 +589,7 @@ extension AnalyticsService {
             "model": model,
             "messages": [
                 ["role": "system", "content": "You are a productivity analytics assistant. Always respond with valid JSON."],
-                ["role": "user", "content": prompt]
+                ["role": "user", "content": contentArray]
             ],
             "response_format": [
                 "type": "json_schema",
@@ -495,6 +600,8 @@ extension AnalyticsService {
                 ]
             ]
         ]
+
+        logCallback("Total message parts (text + images): \(contentArray.count)")
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -531,7 +638,7 @@ extension AnalyticsService {
         return try JSONDecoder().decode(AppUsageAnalysis.self, from: content.data(using: .utf8)!)
     }
 
-    private func queryHuggingFaceStructured(prompt: String, model: String, apiKey: String, logCallback: @escaping (String) -> Void) async throws -> AppUsageAnalysis {
+    private func queryHuggingFaceStructured(prompt: String, batchData: [(before: Data?, after: Data?, metadata: ClickEvent)], sendAllScreenshots: Bool, model: String, apiKey: String, logCallback: @escaping (String) -> Void) async throws -> AppUsageAnalysis {
         // HuggingFace: Use same approach but without response_format (will parse from content)
         let url = URL(string: "https://router.huggingface.co/v1/chat/completions")!
         logCallback("Request URL: \(url)")
@@ -542,15 +649,55 @@ extension AnalyticsService {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
+        // Build message content with text and images
+        var contentArray: [[String: Any]] = [
+            ["type": "text", "text": prompt]
+        ]
+
+        // Add screenshots as base64 images (compressed to 1080p)
+        for (index, data) in batchData.enumerated() {
+            // Always send before screenshot (compressed)
+            if let beforeData = data.before,
+               let compressedData = compressImage(beforeData) {
+                let base64 = compressedData.base64EncodedString()
+                let originalSize = Double(beforeData.count) / 1024 / 1024
+                let compressedSize = Double(compressedData.count) / 1024 / 1024
+                contentArray.append([
+                    "type": "image_url",
+                    "image_url": [
+                        "url": "data:image/jpeg;base64,\(base64)"
+                    ]
+                ])
+                logCallback("Added before screenshot for event \(index + 1) (\(String(format: "%.2f", originalSize))MB → \(String(format: "%.2f", compressedSize))MB)")
+            }
+
+            // Only send after screenshot if requested
+            if sendAllScreenshots, let afterData = data.after,
+               let compressedData = compressImage(afterData) {
+                let base64 = compressedData.base64EncodedString()
+                let originalSize = Double(afterData.count) / 1024 / 1024
+                let compressedSize = Double(compressedData.count) / 1024 / 1024
+                contentArray.append([
+                    "type": "image_url",
+                    "image_url": [
+                        "url": "data:image/jpeg;base64,\(base64)"
+                    ]
+                ])
+                logCallback("Added after screenshot for event \(index + 1) (\(String(format: "%.2f", originalSize))MB → \(String(format: "%.2f", compressedSize))MB)")
+            }
+        }
+
         let body: [String: Any] = [
             "model": model,
             "messages": [
                 ["role": "system", "content": "You are a productivity analytics assistant. Always respond with valid JSON only, no other text."],
-                ["role": "user", "content": prompt]
+                ["role": "user", "content": contentArray]
             ],
-            "max_tokens": 2048,
+            "max_tokens": 4096,
             "stream": false
         ]
+
+        logCallback("Total message parts (text + images): \(contentArray.count)")
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -585,18 +732,23 @@ extension AnalyticsService {
 
         logCallback("Decoding app usage data...")
         // Parse JSON from content
-        return try JSONDecoder().decode(AppUsageAnalysis.self, from: content.data(using: .utf8)!)
+        let analysis = try JSONDecoder().decode(AppUsageAnalysis.self, from: content.data(using: .utf8)!)
+        logCallback("Decoded \(analysis.apps.count) apps from LLM response")
+        for app in analysis.apps {
+            logCallback("  - \(app.appName): \(app.secondsUsed) seconds")
+        }
+        return analysis
     }
 
     private func aggregateAppUsage(_ entries: [AppUsageEntry]) -> [AppUsageEntry] {
         var appTotals: [String: Double] = [:]
 
         for entry in entries {
-            appTotals[entry.appName, default: 0] += entry.minutesUsed
+            appTotals[entry.appName, default: 0] += entry.secondsUsed
         }
 
-        return appTotals.map { AppUsageEntry(appName: $0.key, minutesUsed: $0.value) }
-            .sorted(by: { $0.minutesUsed > $1.minutesUsed })
+        return appTotals.map { AppUsageEntry(appName: $0.key, secondsUsed: $0.value) }
+            .sorted(by: { $0.secondsUsed > $1.secondsUsed })
     }
 }
 

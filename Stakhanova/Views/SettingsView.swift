@@ -7,6 +7,7 @@ struct SettingsView: View {
     @State private var apiKey: String = ""
     @State private var selectedProvider: LLMProvider = .openai
     @State private var selectedModel: LLMModel?
+    @State private var sendAllScreenshots: Bool = false
 
     // Analytics state
     @State private var sessions: [SessionInfo] = []
@@ -28,7 +29,7 @@ struct SettingsView: View {
             settingsTab
             aboutTab
         }
-        .frame(width: 800, height: 600)
+        .frame(minWidth: 1200, minHeight: 800)
         .onAppear {
             loadSettings()
             loadSessions()
@@ -45,14 +46,14 @@ struct SettingsView: View {
     }
 
     private var analyticsTab: some View {
-        VStack(spacing: 20) {
-                // Session selector
+        VStack(spacing: 0) {
+                // Session selector - at the very top
                 HStack {
                     Text("Session:")
                         .font(.headline)
 
                     Picker("Select Session", selection: $selectedSession) {
-                        Text("Select a session").tag(nil as SessionInfo?)
+                        Text("Select a session to begin").tag(nil as SessionInfo?)
                         ForEach(sessions) { session in
                             Text(session.displayName).tag(session as SessionInfo?)
                         }
@@ -70,6 +71,7 @@ struct SettingsView: View {
                     .buttonStyle(.borderless)
                 }
                 .padding()
+                .background(Color.gray.opacity(0.05))
 
                 // Screenshot carousel with metadata
                 if !sessionScreenshots.isEmpty {
@@ -240,11 +242,13 @@ struct SettingsView: View {
                                                 Text(window.ownerName ?? "Unknown")
                                                     .font(.caption2)
                                                     .foregroundColor(.primary)
+                                                    .textSelection(.enabled)
                                                 if let title = window.title, !title.isEmpty {
                                                     Text(title)
                                                         .font(.caption2)
                                                         .foregroundColor(.secondary)
                                                         .lineLimit(1)
+                                                        .textSelection(.enabled)
                                                 }
                                             }
                                             .padding(.leading, 8)
@@ -271,6 +275,7 @@ struct SettingsView: View {
                                                 .font(.caption2)
                                                 .foregroundColor(.secondary)
                                                 .padding(.leading, 8)
+                                                .textSelection(.enabled)
                                         }
                                         if metadata.runningApps.count > 5 {
                                             Text("... and \(metadata.runningApps.count - 5) more")
@@ -401,22 +406,16 @@ struct SettingsView: View {
 
                         ScrollView {
                             ScrollViewReader { proxy in
-                                VStack(alignment: .leading, spacing: 2) {
-                                    ForEach(Array(analysisLogs.enumerated()), id: \.offset) { index, log in
-                                        Text(log)
-                                            .font(.system(size: 10, design: .monospaced))
-                                            .foregroundColor(.primary)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 2)
-                                            .id(index)
+                                Text(analysisLogs.joined(separator: "\n"))
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(.primary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(8)
+                                    .textSelection(.enabled)
+                                    .id("logs")
+                                    .onChange(of: analysisLogs.count) { _, _ in
+                                        proxy.scrollTo("logs", anchor: .bottom)
                                     }
-                                }
-                                .onChange(of: analysisLogs.count) { _, _ in
-                                    if let lastIndex = analysisLogs.indices.last {
-                                        proxy.scrollTo(lastIndex, anchor: .bottom)
-                                    }
-                                }
                             }
                         }
                         .frame(height: 200)
@@ -555,6 +554,9 @@ struct SettingsView: View {
                                 .foregroundColor(.secondary)
                         }
                     }
+
+                    Toggle("Send all screenshots (before & after)", isOn: $sendAllScreenshots)
+                        .help("By default, only before-click screenshots are sent to save bandwidth. Enable to send both before and after screenshots.")
 
                     Text("Settings are saved automatically")
                         .font(.caption)
@@ -800,6 +802,7 @@ struct SettingsView: View {
                 addLog("Loading session data...")
                 let result = try await analyticsService.analyzeSession(
                     sessionPath: session.path,
+                    sendAllScreenshots: sendAllScreenshots,
                     progressCallback: { prog in
                         DispatchQueue.main.async {
                             self.progress = prog
@@ -813,13 +816,22 @@ struct SettingsView: View {
                 addLog("Analysis complete!")
                 addLog("Total apps analyzed: \(result.count)")
 
+                let totalMins = result.reduce(0) { $0 + $1.minutesUsed }
+                addLog("Total minutes: \(String(format: "%.1f", totalMins))")
+
+                for (idx, app) in result.prefix(5).enumerated() {
+                    addLog("  \(idx + 1). \(app.appName): \(String(format: "%.1f", app.minutesUsed)) min")
+                }
+
                 await MainActor.run {
+                    addLog("Setting analysisResult in UI...")
                     analysisResult = SessionAnalysisResult(
                         session: session,
                         appUsage: result,
-                        totalMinutes: result.reduce(0) { $0 + $1.minutesUsed }
+                        totalMinutes: totalMins
                     )
                     isAnalyzing = false
+                    addLog("UI updated - analysisResult is now set with \(result.count) apps")
                 }
             } catch {
                 addLog("ERROR: \(error.localizedDescription)")
@@ -845,6 +857,7 @@ struct MetadataRow: View {
             Text(value)
                 .font(.caption)
                 .foregroundColor(.primary)
+                .textSelection(.enabled)
             Spacer()
         }
     }

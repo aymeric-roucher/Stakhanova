@@ -8,7 +8,11 @@ struct AppUsageAnalysis: Codable {
 struct AppUsageEntry: Codable, Identifiable {
     var id: String { appName }
     let appName: String
-    let minutesUsed: Double
+    let secondsUsed: Double
+
+    var minutesUsed: Double {
+        secondsUsed / 60.0
+    }
 }
 
 // Session info
