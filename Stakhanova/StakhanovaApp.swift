@@ -5,8 +5,12 @@ struct StakhanovaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        Settings {
-            SettingsView()
+        // Menu bar only app - no main window
+        WindowGroup {
+            EmptyView()
+        }
+        .commands {
+            CommandGroup(replacing: .newItem) { }
         }
     }
 }
@@ -18,6 +22,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     var startMenuItem: NSMenuItem?
     var stopMenuItem: NSMenuItem?
+    var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Create menu bar item
@@ -51,17 +56,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(stopMenuItem!)
         menu.addItem(NSMenuItem.separator())
 
-        let openFolderItem = NSMenuItem(title: "Open Captures Folder", action: #selector(openCapturesFolder), keyEquivalent: "o")
+        let openFolderItem = NSMenuItem(title: "Open Captures Folder", action: #selector(openCapturesFolder), keyEquivalent: "f")
         openFolderItem.target = self
         menu.addItem(openFolderItem)
 
-        let analyzeItem = NSMenuItem(title: "Analyze Screenshots", action: #selector(analyzeScreenshots), keyEquivalent: "a")
-        analyzeItem.target = self
-        menu.addItem(analyzeItem)
-
         menu.addItem(NSMenuItem.separator())
 
-        let settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
+        let settingsItem = NSMenuItem(title: "Open Stakhanova...", action: #selector(openSettings), keyEquivalent: "o")
         settingsItem.target = self
         menu.addItem(settingsItem)
 
@@ -85,6 +86,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         captureService?.endSession()
         updateMenuItems()
         print("Stopped monitoring clicks")
+
+        // Notify that a new session was created
+        NotificationCenter.default.post(name: NSNotification.Name("SessionEnded"), object: nil)
     }
 
     func updateMenuItems() {
@@ -125,13 +129,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSWorkspace.shared.open(capturesDir)
     }
 
-    @objc func analyzeScreenshots() {
-        // TODO: Trigger LLM analysis
-        print("Analyzing screenshots...")
-    }
-
     @objc func openSettings() {
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        print("openSettings called")
+        if settingsWindow == nil {
+            print("Creating new settings window")
+            let settingsView = SettingsView()
+            let hostingController = NSHostingController(rootView: settingsView)
+
+            let window = NSWindow(contentViewController: hostingController)
+            window.title = "Stakhanova"
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            window.setContentSize(NSSize(width: 800, height: 600))
+            window.center()
+
+            settingsWindow = window
+        }
+
+        print("Making settings window visible")
+        settingsWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     func requestPermissions() {

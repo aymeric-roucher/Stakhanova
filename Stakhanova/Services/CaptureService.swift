@@ -1,8 +1,8 @@
 import Cocoa
 import ScreenCaptureKit
+import CoreGraphics
 
 class CaptureService {
-    private let storageService = StorageService()
     private var sessionFolder: String?
     private let computerID: String = {
         var size = 0
@@ -61,23 +61,22 @@ class CaptureService {
         }
     }
 
-    /// Capture the entire screen
+    /// Capture the entire screen using CGDisplayCreateImage (most compatible)
     private func captureScreen() -> Data? {
-        // Get main display
-        guard let displayID = CGMainDisplayID() as CGDirectDisplayID? else {
+        // Use the main display ID
+        let displayID = CGMainDisplayID()
+
+        // Create image of the display
+        guard let cgImage = CGDisplayCreateImage(displayID) else {
+            print("Failed to capture screen")
+            print("Make sure Screen Recording permission is granted in System Settings > Privacy & Security > Screen Recording")
             return nil
         }
 
-        // Create screenshot
-        guard let image = CGDisplayCreateImage(displayID) else {
-            return nil
-        }
-
-        // Convert to NSImage and then to PNG data
-        let nsImage = NSImage(cgImage: image, size: .zero)
-        guard let tiffData = nsImage.tiffRepresentation,
-              let bitmapImage = NSBitmapImageRep(data: tiffData),
-              let pngData = bitmapImage.representation(using: .png, properties: [:]) else {
+        // Convert CGImage to PNG data
+        let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
+        guard let pngData = bitmapRep.representation(using: .png, properties: [:]) else {
+            print("Failed to convert screenshot to PNG")
             return nil
         }
 

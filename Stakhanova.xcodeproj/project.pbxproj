@@ -15,6 +15,9 @@
 		A1000006000000000000001 /* StorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000006000000000000001 /* StorageService.swift */; };
 		A1000007000000000000001 /* AnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000007000000000000001 /* AnalyticsService.swift */; };
 		A1000008000000000000001 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000008000000000000001 /* SettingsView.swift */; };
+		A1000009000000000000001 /* EnvLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000010000000000000001 /* EnvLoader.swift */; };
+		A1000010000000000000002 /* AnalyticsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000011000000000000001 /* AnalyticsModels.swift */; };
+		A1000011000000000000002 /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000012000000000000001 /* AnalyticsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,6 +31,9 @@
 		B1000007000000000000001 /* AnalyticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsService.swift; sourceTree = "<group>"; };
 		B1000008000000000000001 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		B1000009000000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B1000010000000000000001 /* EnvLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvLoader.swift; sourceTree = "<group>"; };
+		B1000011000000000000001 /* AnalyticsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsModels.swift; sourceTree = "<group>"; };
+		B1000012000000000000001 /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -64,6 +70,7 @@
 				E1000004000000000000001 /* Models */,
 				E1000005000000000000001 /* Services */,
 				E1000006000000000000001 /* Views */,
+				E1000007000000000000001 /* Utils */,
 				B1000009000000000000001 /* Info.plist */,
 			);
 			path = Stakhanova;
@@ -73,6 +80,7 @@
 			isa = PBXGroup;
 			children = (
 				B1000002000000000000001 /* ClickEvent.swift */,
+				B1000011000000000000001 /* AnalyticsModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -93,8 +101,17 @@
 			isa = PBXGroup;
 			children = (
 				B1000008000000000000001 /* SettingsView.swift */,
+				B1000012000000000000001 /* AnalyticsView.swift */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		E1000007000000000000001 /* Utils */ = {
+			isa = PBXGroup;
+			children = (
+				B1000010000000000000001 /* EnvLoader.swift */,
+			);
+			path = Utils;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -168,6 +185,9 @@
 				A1000006000000000000001 /* StorageService.swift in Sources */,
 				A1000007000000000000001 /* AnalyticsService.swift in Sources */,
 				A1000008000000000000001 /* SettingsView.swift in Sources */,
+				A1000009000000000000001 /* EnvLoader.swift in Sources */,
+				A1000010000000000000002 /* AnalyticsModels.swift in Sources */,
+				A1000011000000000000002 /* AnalyticsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -196,7 +216,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 			};
 			name = Debug;
 		};
@@ -222,7 +242,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 			};
 			name = Release;
 		};

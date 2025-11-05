@@ -18,7 +18,7 @@ class StorageService: ObservableObject {
     /// Upload a click event to Google Cloud Storage
     func uploadClickEvent(_ event: ClickEvent) async throws {
         guard let bucketName = bucketName,
-              let serviceAccountJSON = serviceAccountJSON else {
+              let _ = serviceAccountJSON else {
             throw StorageError.missingConfiguration
         }
 
