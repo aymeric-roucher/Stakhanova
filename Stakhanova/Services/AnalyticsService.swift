@@ -1,8 +1,10 @@
 import Foundation
 import AppKit
+import Combine
 
 class AnalyticsService: ObservableObject {
     static let shared = AnalyticsService()
+    private var cancellables = Set<AnyCancellable>()
 
     // Helper function to compress image to 1080p max
     private func compressImage(_ imageData: Data) -> Data? {
@@ -42,6 +44,7 @@ class AnalyticsService: ObservableObject {
     private let apiKeyKey = "LLMAPIKey"
     private let apiProviderKey = "LLMProvider"
     private let modelKey = "LLMModel"
+    private let reasoningEffortKey = "OpenAIReasoningEffort"
 
     @Published var apiKey: String? {
         didSet {
@@ -55,14 +58,13 @@ class AnalyticsService: ObservableObject {
         }
     }
 
-    @Published var selectedModel: String? {
-        didSet {
-            userDefaults.set(selectedModel, forKey: modelKey)
-        }
-    }
+    @Published var selectedModel: String?
+
+    @Published var reasoningEffort: String
 
     private init() {
-        // Load initial values from UserDefaults or .env
+        // Initialize all properties first
+        self.reasoningEffort = userDefaults.string(forKey: reasoningEffortKey) ?? "minimal"
 
         // Check if provider is set in UserDefaults
         if let rawValue = userDefaults.string(forKey: apiProviderKey),
@@ -89,6 +91,19 @@ class AnalyticsService: ObservableObject {
             // Auto-select first model for the provider
             self.selectedModel = self.apiProvider.availableModels.first?.id
         }
+
+        // Set up observers for UserDefaults persistence
+        $selectedModel
+            .sink { [weak self] value in
+                self?.userDefaults.set(value, forKey: self?.modelKey ?? "")
+            }
+            .store(in: &cancellables)
+
+        $reasoningEffort
+            .sink { [weak self] value in
+                self?.userDefaults.set(value, forKey: self?.reasoningEffortKey ?? "")
+            }
+            .store(in: &cancellables)
     }
 
     /// Analyze a session folder with batch processing
@@ -192,149 +207,6 @@ class AnalyticsService: ObservableObject {
         }
     }
 
-    /// Analyze a batch of click events using LLM
-    func analyzeClickEvents(_ events: [ClickEvent]) async throws -> AnalyticsResult {
-        // Get API key based on provider
-        guard let apiKey = getEffectiveApiKey(), !apiKey.isEmpty else {
-            throw AnalyticsError.missingAPIKey
-        }
-
-        guard let model = selectedModel else {
-            throw AnalyticsError.missingModel
-        }
-
-        let prompt = buildAnalysisPrompt(from: events)
-        let analysis = try await queryLLM(prompt: prompt, model: model, apiKey: apiKey)
-
-        return AnalyticsResult(
-            timestamp: Date(),
-            eventsAnalyzed: events.count,
-            analysis: analysis,
-            events: events
-        )
-    }
-
-    private func buildAnalysisPrompt(from events: [ClickEvent]) -> String {
-        var prompt = """
-        Analyze user interaction data to provide insights about productivity, app usage patterns, and behavior.
-
-        I have \(events.count) click events with the following information for each:
-        - Timestamp
-        - Active application
-        - Clicked UI element (type, label, description)
-        - All open windows and applications at the time
-        - Modifier keys used
-
-        Please analyze these events and provide:
-        1. Overall productivity patterns
-        2. Most used applications and features
-        3. Workflow patterns and context switching behavior
-        4. Recommendations for improving efficiency
-
-        Here are the events:
-
-        """
-
-        for (index, event) in events.enumerated() {
-            prompt += "\n--- Event \(index + 1) ---\n"
-            prompt += "Time: \(event.timestamp.formatted())\n"
-            prompt += "App: \(event.activeApp.name)\n"
-
-            if let element = event.clickedElement {
-                prompt += "Clicked: \(element.role ?? "unknown") - \(element.title ?? element.label ?? "no label")\n"
-            }
-
-            if !event.openWindows.isEmpty {
-                prompt += "Open windows: \(event.openWindows.map { $0.ownerName ?? "unknown" }.joined(separator: ", "))\n"
-            }
-
-            if !event.modifierFlags.isEmpty {
-                prompt += "Modifiers: \(event.modifierFlags.joined(separator: ", "))\n"
-            }
-        }
-
-        return prompt
-    }
-
-    private func queryLLM(prompt: String, model: String, apiKey: String) async throws -> String {
-        switch apiProvider {
-        case .openai:
-            return try await queryOpenAI(prompt: prompt, model: model, apiKey: apiKey)
-        case .huggingface:
-            return try await queryHuggingFace(prompt: prompt, model: model, apiKey: apiKey)
-        }
-    }
-
-    private func queryOpenAI(prompt: String, model: String, apiKey: String) async throws -> String {
-        let url = URL(string: "https://api.openai.com/v1/chat/completions")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let body: [String: Any] = [
-            "model": model,
-            "messages": [
-                ["role": "developer", "content": "You are a productivity analytics assistant."],
-                ["role": "user", "content": prompt]
-            ],
-            "max_tokens": 4096
-        ]
-
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw AnalyticsError.apiRequestFailed
-        }
-
-        guard httpResponse.statusCode == 200 else {
-            if let errorString = String(data: data, encoding: .utf8) {
-                print("OpenAI API error: \(errorString)")
-            }
-            throw AnalyticsError.apiRequestFailed
-        }
-
-        let result = try JSONDecoder().decode(OpenAIResponse.self, from: data)
-        return result.choices.first?.message.content ?? ""
-    }
-
-    private func queryHuggingFace(prompt: String, model: String, apiKey: String) async throws -> String {
-        let url = URL(string: "https://router.huggingface.co/v1/chat/completions")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let body: [String: Any] = [
-            "model": model,
-            "messages": [
-                ["role": "system", "content": "You are a productivity analytics assistant."],
-                ["role": "user", "content": prompt]
-            ],
-            "max_tokens": 4096,
-            "stream": false
-        ]
-
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw AnalyticsError.apiRequestFailed
-        }
-
-        guard httpResponse.statusCode == 200 else {
-            if let errorString = String(data: data, encoding: .utf8) {
-                print("HuggingFace API error: \(errorString)")
-            }
-            throw AnalyticsError.apiRequestFailed
-        }
-
-        let result = try JSONDecoder().decode(OpenAIResponse.self, from: data)
-        return result.choices.first?.message.content ?? ""
-    }
 }
 
 // MARK: - Models
@@ -380,6 +252,7 @@ struct AnalyticsResult: Identifiable {
     let events: [ClickEvent]
 }
 
+// Chat Completions API response (legacy)
 struct OpenAIResponse: Codable {
     let choices: [OpenAIChoice]
 }
@@ -390,6 +263,22 @@ struct OpenAIChoice: Codable {
 
 struct OpenAIMessage: Codable {
     let content: String
+}
+
+// Responses API response
+struct ResponsesAPIResponse: Codable {
+    let id: String
+    let output: [ResponseOutputItem]
+}
+
+struct ResponseOutputItem: Codable {
+    let type: String
+    let content: [ResponseContent]?
+}
+
+struct ResponseContent: Codable {
+    let type: String
+    let text: String?
 }
 
 extension AnalyticsService {
@@ -511,25 +400,26 @@ extension AnalyticsService {
     private func queryLLMWithStructuredOutput(prompt: String, batchData: [(before: Data?, after: Data?, metadata: ClickEvent)], sendAllScreenshots: Bool, model: String, apiKey: String, logCallback: @escaping (String) -> Void) async throws -> AppUsageAnalysis {
         switch apiProvider {
         case .openai:
-            return try await queryOpenAIStructured(prompt: prompt, batchData: batchData, sendAllScreenshots: sendAllScreenshots, model: model, apiKey: apiKey, logCallback: logCallback)
+            return try await queryOpenAI(prompt: prompt, batchData: batchData, sendAllScreenshots: sendAllScreenshots, model: model, apiKey: apiKey, logCallback: logCallback)
         case .huggingface:
-            return try await queryHuggingFaceStructured(prompt: prompt, batchData: batchData, sendAllScreenshots: sendAllScreenshots, model: model, apiKey: apiKey, logCallback: logCallback)
+            return try await queryHuggingFace(prompt: prompt, batchData: batchData, sendAllScreenshots: sendAllScreenshots, model: model, apiKey: apiKey, logCallback: logCallback)
         }
     }
 
-    private func queryOpenAIStructured(prompt: String, batchData: [(before: Data?, after: Data?, metadata: ClickEvent)], sendAllScreenshots: Bool, model: String, apiKey: String, logCallback: @escaping (String) -> Void) async throws -> AppUsageAnalysis {
-        let url = URL(string: "https://api.openai.com/v1/chat/completions")!
+    private func queryOpenAI(prompt: String, batchData: [(before: Data?, after: Data?, metadata: ClickEvent)], sendAllScreenshots: Bool, model: String, apiKey: String, logCallback: @escaping (String) -> Void) async throws -> AppUsageAnalysis {
+        let url = URL(string: "https://api.openai.com/v1/responses")!
         logCallback("Request URL: \(url)")
         logCallback("Model: \(model)")
+        logCallback("Reasoning effort: \(reasoningEffort)")
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        // Build message content with text and images
+        // Build content array with text and images
         var contentArray: [[String: Any]] = [
-            ["type": "text", "text": prompt]
+            ["type": "input_text", "text": prompt]
         ]
 
         // Add screenshots as base64 images (compressed to 1080p)
@@ -541,10 +431,8 @@ extension AnalyticsService {
                 let originalSize = Double(beforeData.count) / 1024 / 1024
                 let compressedSize = Double(compressedData.count) / 1024 / 1024
                 contentArray.append([
-                    "type": "image_url",
-                    "image_url": [
-                        "url": "data:image/jpeg;base64,\(base64)"
-                    ]
+                    "type": "input_image",
+                    "image_url": "data:image/jpeg;base64,\(base64)"
                 ])
                 logCallback("Added before screenshot for event \(index + 1) (\(String(format: "%.2f", originalSize))MB → \(String(format: "%.2f", compressedSize))MB)")
             }
@@ -556,14 +444,21 @@ extension AnalyticsService {
                 let originalSize = Double(afterData.count) / 1024 / 1024
                 let compressedSize = Double(compressedData.count) / 1024 / 1024
                 contentArray.append([
-                    "type": "image_url",
-                    "image_url": [
-                        "url": "data:image/jpeg;base64,\(base64)"
-                    ]
+                    "type": "input_image",
+                    "image_url": "data:image/jpeg;base64,\(base64)"
                 ])
                 logCallback("Added after screenshot for event \(index + 1) (\(String(format: "%.2f", originalSize))MB → \(String(format: "%.2f", compressedSize))MB)")
             }
         }
+
+        // Wrap content in a message input item
+        let inputArray: [[String: Any]] = [
+            [
+                "type": "message",
+                "role": "user",
+                "content": contentArray
+            ]
+        ]
 
         let schema: [String: Any] = [
             "type": "object",
@@ -587,13 +482,14 @@ extension AnalyticsService {
 
         let body: [String: Any] = [
             "model": model,
-            "messages": [
-                ["role": "system", "content": "You are a productivity analytics assistant. Always respond with valid JSON."],
-                ["role": "user", "content": contentArray]
+            "input": inputArray,
+            "instructions": "You are a productivity analytics assistant. Always respond with valid JSON.",
+            "reasoning": [
+                "effort": reasoningEffort
             ],
-            "response_format": [
-                "type": "json_schema",
-                "json_schema": [
+            "text": [
+                "format": [
+                    "type": "json_schema",
                     "name": "app_usage_analysis",
                     "strict": true,
                     "schema": schema
@@ -601,7 +497,7 @@ extension AnalyticsService {
             ]
         ]
 
-        logCallback("Total message parts (text + images): \(contentArray.count)")
+        logCallback("Total content parts (text + images): \(contentArray.count)")
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -624,21 +520,26 @@ extension AnalyticsService {
         }
 
         logCallback("Parsing response...")
-        let result = try JSONDecoder().decode(OpenAIResponse.self, from: data)
-        guard let content = result.choices.first?.message.content else {
-            logCallback("ERROR: No content in response")
+        let result = try JSONDecoder().decode(ResponsesAPIResponse.self, from: data)
+
+        // Find the message item with content
+        guard let messageItem = result.output.first(where: { $0.type == "message" && $0.content != nil }),
+              let contentArray = messageItem.content,
+              let textContent = contentArray.first(where: { $0.type == "output_text" }),
+              let text = textContent.text else {
+            logCallback("ERROR: No message content in response")
             throw AnalyticsError.apiRequestFailed
         }
 
         logCallback("LLM Response:")
-        logCallback(content)
+        logCallback(text)
         logCallback("---")
 
         logCallback("Decoding app usage data...")
-        return try JSONDecoder().decode(AppUsageAnalysis.self, from: content.data(using: .utf8)!)
+        return try JSONDecoder().decode(AppUsageAnalysis.self, from: text.data(using: .utf8)!)
     }
 
-    private func queryHuggingFaceStructured(prompt: String, batchData: [(before: Data?, after: Data?, metadata: ClickEvent)], sendAllScreenshots: Bool, model: String, apiKey: String, logCallback: @escaping (String) -> Void) async throws -> AppUsageAnalysis {
+    private func queryHuggingFace(prompt: String, batchData: [(before: Data?, after: Data?, metadata: ClickEvent)], sendAllScreenshots: Bool, model: String, apiKey: String, logCallback: @escaping (String) -> Void) async throws -> AppUsageAnalysis {
         // HuggingFace: Use same approach but without response_format (will parse from content)
         let url = URL(string: "https://router.huggingface.co/v1/chat/completions")!
         logCallback("Request URL: \(url)")

@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var selectedProvider: LLMProvider = .openai
     @State private var selectedModel: LLMModel?
     @State private var sendAllScreenshots: Bool = false
+    @State private var reasoningEffort: String = "minimal"
 
     // Analytics state
     @State private var sessions: [SessionInfo] = []
@@ -555,6 +556,26 @@ struct SettingsView: View {
                         }
                     }
 
+                    // Reasoning effort picker (OpenAI only)
+                    if selectedProvider == .openai {
+                        HStack {
+                            Text("Reasoning Effort:")
+                            Picker("", selection: $reasoningEffort) {
+                                Text("Minimal").tag("minimal")
+                                Text("Medium").tag("medium")
+                                Text("High").tag("high")
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(width: 250)
+                            .onChange(of: reasoningEffort) { oldValue, newValue in
+                                analyticsService.reasoningEffort = newValue
+                            }
+                        }
+                        Text("Controls how much computational effort OpenAI uses for reasoning. Minimal = fastest, high = most thorough.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
                     Toggle("Send all screenshots (before & after)", isOn: $sendAllScreenshots)
                         .help("By default, only before-click screenshots are sent to save bandwidth. Enable to send both before and after screenshots.")
 
@@ -670,6 +691,9 @@ struct SettingsView: View {
         } else {
             selectedModel = selectedProvider.availableModels.first
         }
+
+        // Load reasoning effort
+        reasoningEffort = analyticsService.reasoningEffort
     }
 
     private func loadSessions() {
