@@ -20,6 +20,7 @@ struct SettingsView: View {
     @State private var currentScreenshotIndex: Int = 0
     @State private var zoomedImage: NSImage?
     @State private var showZoomWindow = false
+    @State private var analysisLogs: [String] = []
 
     var body: some View {
         TabView {
@@ -72,12 +73,13 @@ struct SettingsView: View {
 
                 // Screenshot carousel with metadata
                 if !sessionScreenshots.isEmpty {
-                    HStack(alignment: .top, spacing: 20) {
-                        // Left: Screenshots
-                        VStack(spacing: 10) {
-                            Text("Event \(currentScreenshotIndex + 1) of \(sessionScreenshots.count)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                    ScrollView {
+                        HStack(alignment: .top, spacing: 20) {
+                            // Left: Screenshots
+                            VStack(spacing: 10) {
+                                Text("Event \(currentScreenshotIndex + 1) of \(sessionScreenshots.count)")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
 
                             HStack(spacing: 20) {
                                 // Before screenshot
@@ -161,71 +163,205 @@ struct SettingsView: View {
                             }
                             .padding(.horizontal, 40)
                         }
-                        .frame(maxWidth: .infinity)
 
-                        // Right: Metadata
-                        if currentScreenshotIndex < sessionMetadata.count {
-                            ScrollView {
-                                VStack(alignment: .leading, spacing: 8) {
+                        // Right: Metadata (must always exist if screenshots exist)
+                        VStack(alignment: .leading, spacing: 8) {
                                     Text("Event Metadata")
                                         .font(.headline)
                                         .padding(.bottom, 4)
 
                                     let metadata = sessionMetadata[currentScreenshotIndex]
 
-                                    MetadataRow(label: "App", value: metadata.activeApp.name)
-                                    MetadataRow(label: "Time", value: metadata.timestamp.formatted(date: .omitted, time: .shortened))
+                                    Divider()
 
-                                    if let element = metadata.clickedElement {
-                                        MetadataRow(label: "Element", value: element.role ?? "Unknown")
-                                        if let title = element.title ?? element.label {
-                                            MetadataRow(label: "Label", value: title)
-                                        }
+                                    Text("Application")
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.secondary)
+
+                                    MetadataRow(label: "Name", value: metadata.activeApp.name)
+                                    if let bundleId = metadata.activeApp.bundleIdentifier {
+                                        MetadataRow(label: "Bundle ID", value: bundleId)
                                     }
+                                    MetadataRow(label: "PID", value: String(metadata.activeApp.processID))
 
+                                    Divider().padding(.vertical, 4)
+
+                                    Text("Event Details")
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.secondary)
+
+                                    MetadataRow(label: "Time", value: metadata.timestamp.formatted(date: .abbreviated, time: .shortened))
                                     MetadataRow(label: "Position", value: String(format: "%.0f, %.0f", metadata.mousePosition.x, metadata.mousePosition.y))
 
                                     if !metadata.modifierFlags.isEmpty {
                                         MetadataRow(label: "Modifiers", value: metadata.modifierFlags.joined(separator: ", "))
                                     }
 
-                                    if !metadata.openWindows.isEmpty {
-                                        Text("Open Windows:")
+                                    if let element = metadata.clickedElement {
+                                        Divider().padding(.vertical, 4)
+
+                                        Text("Clicked Element")
                                             .font(.caption)
+                                            .fontWeight(.semibold)
                                             .foregroundColor(.secondary)
-                                            .padding(.top, 4)
+
+                                        if let role = element.role {
+                                            MetadataRow(label: "Role", value: role)
+                                        }
+                                        if let title = element.title {
+                                            MetadataRow(label: "Title", value: title)
+                                        }
+                                        if let label = element.label {
+                                            MetadataRow(label: "Label", value: label)
+                                        }
+                                        if let description = element.description {
+                                            MetadataRow(label: "Desc", value: description)
+                                        }
+                                        if let value = element.value {
+                                            MetadataRow(label: "Value", value: value)
+                                        }
+                                        if let type = element.elementType {
+                                            MetadataRow(label: "Type", value: type)
+                                        }
+                                    }
+
+                                    if !metadata.openWindows.isEmpty {
+                                        Divider().padding(.vertical, 4)
+
+                                        Text("Open Windows (\(metadata.openWindows.count))")
+                                            .font(.caption)
+                                            .fontWeight(.semibold)
+                                            .foregroundColor(.secondary)
+
                                         ForEach(Array(metadata.openWindows.prefix(5).enumerated()), id: \.offset) { index, window in
-                                            Text("• \(window.ownerName ?? "Unknown")")
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(window.ownerName ?? "Unknown")
+                                                    .font(.caption2)
+                                                    .foregroundColor(.primary)
+                                                if let title = window.title, !title.isEmpty {
+                                                    Text(title)
+                                                        .font(.caption2)
+                                                        .foregroundColor(.secondary)
+                                                        .lineLimit(1)
+                                                }
+                                            }
+                                            .padding(.leading, 8)
+                                            .padding(.vertical, 2)
+                                        }
+                                        if metadata.openWindows.count > 5 {
+                                            Text("... and \(metadata.openWindows.count - 5) more")
                                                 .font(.caption2)
                                                 .foregroundColor(.secondary)
+                                                .padding(.leading, 8)
+                                        }
+                                    }
+
+                                    if !metadata.runningApps.isEmpty {
+                                        Divider().padding(.vertical, 4)
+
+                                        Text("Running Apps (\(metadata.runningApps.count))")
+                                            .font(.caption)
+                                            .fontWeight(.semibold)
+                                            .foregroundColor(.secondary)
+
+                                        ForEach(Array(metadata.runningApps.prefix(5).enumerated()), id: \.offset) { index, app in
+                                            Text(app.name)
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                                .padding(.leading, 8)
+                                        }
+                                        if metadata.runningApps.count > 5 {
+                                            Text("... and \(metadata.runningApps.count - 5) more")
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                                .padding(.leading, 8)
                                         }
                                     }
                                 }
                                 .padding()
-                            }
-                            .frame(width: 250)
-                            .background(Color.gray.opacity(0.05))
-                            .cornerRadius(8)
+                                .frame(width: 300)
+                                .background(Color.gray.opacity(0.05))
+                                .cornerRadius(8)
                         }
+                        .padding()
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(10)
                     }
-                    .padding()
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(10)
                 }
 
-                // Run Analysis button
-                Button(action: runAnalysis) {
-                    HStack {
-                        if isAnalyzing {
-                            ProgressView()
-                                .scaleEffect(0.8)
+                // Run Analysis button with provider/model info
+                VStack(spacing: 8) {
+                    Button(action: runAnalysis) {
+                        HStack {
+                            if isAnalyzing {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                            }
+                            Text(isAnalyzing ? "Analyzing..." : "Run Analysis")
                         }
-                        Text(isAnalyzing ? "Analyzing..." : "Run Analysis")
+                        .frame(width: 200)
                     }
-                    .frame(width: 200)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(selectedSession == nil || isAnalyzing)
+
+                    // Show current provider and model
+                    HStack(spacing: 4) {
+                        Image(systemName: "cpu")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Text("\(analyticsService.apiProvider.rawValue)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        if let modelId = analyticsService.selectedModel,
+                           let model = analyticsService.apiProvider.availableModels.first(where: { $0.id == modelId }) {
+                            Text("•")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text(model.name)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        // Get the actual API key (user-set or .env)
+                        let actualApiKey: String? = {
+                            let userKey = analyticsService.apiKey
+                            if let key = userKey, !key.isEmpty {
+                                return key
+                            }
+                            // Fall back to .env
+                            switch analyticsService.apiProvider {
+                            case .openai:
+                                return EnvLoader.shared.get("OPENAI_API_KEY")
+                            case .huggingface:
+                                return EnvLoader.shared.get("HF_TOKEN")
+                            }
+                        }()
+
+                        Text("•")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        // Show masked API key or warning
+                        if let key = actualApiKey, !key.isEmpty {
+                            let visibleChars = min(4, key.count)
+                            let masked = String(key.prefix(visibleChars)) + String(repeating: "*", count: max(8, key.count - visibleChars))
+                            Text(masked)
+                                .font(.caption)
+                                .foregroundColor(.green)
+                                .fontDesign(.monospaced)
+                        } else {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.caption2)
+                                .foregroundColor(.red)
+                            Text("No API Key")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(selectedSession == nil || isAnalyzing)
 
                 // Progress bar
                 if isAnalyzing {
@@ -241,6 +377,53 @@ struct SettingsView: View {
                     Text(error)
                         .foregroundColor(.red)
                         .padding()
+                }
+
+                // Console logs
+                if !analysisLogs.isEmpty {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack {
+                            Text("Analysis Log")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Button(action: {
+                                analysisLogs.removeAll()
+                            }) {
+                                Image(systemName: "trash")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.gray.opacity(0.1))
+
+                        ScrollView {
+                            ScrollViewReader { proxy in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    ForEach(Array(analysisLogs.enumerated()), id: \.offset) { index, log in
+                                        Text(log)
+                                            .font(.system(size: 10, design: .monospaced))
+                                            .foregroundColor(.primary)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 2)
+                                            .id(index)
+                                    }
+                                }
+                                .onChange(of: analysisLogs.count) { _, _ in
+                                    if let lastIndex = analysisLogs.indices.last {
+                                        proxy.scrollTo(lastIndex, anchor: .bottom)
+                                    }
+                                }
+                            }
+                        }
+                        .frame(height: 200)
+                        .background(Color(NSColor.textBackgroundColor))
+                        .border(Color.gray.opacity(0.3))
+                    }
+                    .padding(.horizontal)
                 }
 
                 // Results
@@ -317,13 +500,49 @@ struct SettingsView: View {
                     .onChange(of: selectedProvider) { oldValue, newValue in
                         // Reset model selection when provider changes
                         selectedModel = newValue.availableModels.first
+                        // Auto-save
+                        analyticsService.apiProvider = newValue
+                        analyticsService.selectedModel = selectedModel?.id
+                        // Reload settings to update API key display for new provider
+                        loadSettings()
                     }
 
                     SecureField("API Key", text: $apiKey)
                         .textFieldStyle(.roundedBorder)
+                        .onChange(of: apiKey) { oldValue, newValue in
+                            // Don't save if it's just the masked .env token (contains asterisks)
+                            if !newValue.contains("*") {
+                                // Auto-save when user types a custom API key
+                                analyticsService.apiKey = newValue.isEmpty ? nil : newValue
+                            }
+                        }
 
-                    if selectedProvider == .huggingface {
-                        Text("Leave empty to use HF_TOKEN from .env file")
+                    // Show .env status
+                    let envKey: String? = {
+                        switch selectedProvider {
+                        case .openai:
+                            return EnvLoader.shared.get("OPENAI_API_KEY")
+                        case .huggingface:
+                            return EnvLoader.shared.get("HF_TOKEN")
+                        }
+                    }()
+                    let envKeyName = selectedProvider == .openai ? "OPENAI_API_KEY" : "HF_TOKEN"
+                    let usingEnvToken = (apiKey.isEmpty || apiKey.contains("*")) && envKey != nil
+
+                    if usingEnvToken {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                            Text("Using \(envKeyName) from .env file")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    } else if apiKey.isEmpty {
+                        Text("No \(envKeyName) found in .env file")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    } else if !apiKey.contains("*") {
+                        Text("Using custom API key (overrides .env)")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -337,15 +556,10 @@ struct SettingsView: View {
                         }
                     }
 
-                    Button("Save Settings") {
-                        // Update the shared service which will automatically persist to UserDefaults
-                        // and trigger updates across all views
-                        analyticsService.apiProvider = selectedProvider
-                        analyticsService.apiKey = apiKey.isEmpty ? nil : apiKey
-                        analyticsService.selectedModel = selectedModel?.id
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .padding(.top)
+                    Text("Settings are saved automatically")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 4)
                 }
 
                 Section(header: Text("Provider Info")) {
@@ -421,11 +635,39 @@ struct SettingsView: View {
     }
 
     private func loadSettings() {
-        apiKey = analyticsService.apiKey ?? ""
         selectedProvider = analyticsService.apiProvider
 
-        // Always use the first available model for the current provider
-        selectedModel = selectedProvider.availableModels.first
+        // Load API key from service (user-set key) or show masked .env token
+        if let userKey = analyticsService.apiKey, !userKey.isEmpty {
+            apiKey = userKey
+        } else {
+            // Check .env based on provider
+            let envKey: String? = {
+                switch selectedProvider {
+                case .openai:
+                    return EnvLoader.shared.get("OPENAI_API_KEY")
+                case .huggingface:
+                    return EnvLoader.shared.get("HF_TOKEN")
+                }
+            }()
+
+            if let envToken = envKey, !envToken.isEmpty {
+                // Show masked .env token (first 4 chars + asterisks)
+                let visibleChars = min(4, envToken.count)
+                let masked = String(envToken.prefix(visibleChars)) + String(repeating: "*", count: max(0, envToken.count - visibleChars))
+                apiKey = masked
+            } else {
+                apiKey = ""
+            }
+        }
+
+        // Load the selected model from service, or default to first available
+        if let savedModelId = analyticsService.selectedModel,
+           let model = selectedProvider.availableModels.first(where: { $0.id == savedModelId }) {
+            selectedModel = model
+        } else {
+            selectedModel = selectedProvider.availableModels.first
+        }
     }
 
     private func loadSessions() {
@@ -515,15 +757,27 @@ struct SettingsView: View {
 
             screenshots.append((before: beforeImage, after: afterImage, timestamp: timestamp))
 
-            // Load metadata
-            if let data = try? Data(contentsOf: metadataFile),
-               let event = try? JSONDecoder().decode(ClickEvent.self, from: data) {
-                metadata.append(event)
-            }
+            // Load metadata - will crash with clear error if it fails
+            let data = try! Data(contentsOf: metadataFile)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let event = try! decoder.decode(ClickEvent.self, from: data)
+            metadata.append(event)
         }
 
         sessionScreenshots = screenshots
         sessionMetadata = metadata
+
+        print("✅ Loaded \(screenshots.count) screenshots and \(metadata.count) metadata entries")
+
+        assert(metadata.count == screenshots.count, "BUG: Screenshots (\(screenshots.count)) and metadata (\(metadata.count)) counts don't match!")
+    }
+
+    private func addLog(_ message: String) {
+        let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+        DispatchQueue.main.async {
+            self.analysisLogs.append("[\(timestamp)] \(message)")
+        }
     }
 
     private func runAnalysis() {
@@ -533,17 +787,31 @@ struct SettingsView: View {
         progress = 0.0
         errorMessage = nil
         analysisResult = nil
+        analysisLogs.removeAll()
+
+        addLog("Starting analysis for session: \(session.displayName)")
+        addLog("Provider: \(analyticsService.apiProvider.rawValue)")
+        if let model = analyticsService.selectedModel {
+            addLog("Model: \(model)")
+        }
 
         Task {
             do {
+                addLog("Loading session data...")
                 let result = try await analyticsService.analyzeSession(
                     sessionPath: session.path,
                     progressCallback: { prog in
                         DispatchQueue.main.async {
                             self.progress = prog
                         }
+                    },
+                    logCallback: { log in
+                        self.addLog(log)
                     }
                 )
+
+                addLog("Analysis complete!")
+                addLog("Total apps analyzed: \(result.count)")
 
                 await MainActor.run {
                     analysisResult = SessionAnalysisResult(
@@ -554,6 +822,7 @@ struct SettingsView: View {
                     isAnalyzing = false
                 }
             } catch {
+                addLog("ERROR: \(error.localizedDescription)")
                 await MainActor.run {
                     errorMessage = "Analysis failed: \(error.localizedDescription)"
                     isAnalyzing = false

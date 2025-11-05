@@ -16,7 +16,7 @@ class StorageService: ObservableObject {
     }
 
     /// Upload a click event to Google Cloud Storage
-    func uploadClickEvent(_ event: ClickEvent) async throws {
+    func uploadClickEvent(_ event: ClickEvent, screenshotBefore: Data?, screenshotAfter: Data?) async throws {
         guard let bucketName = bucketName,
               let _ = serviceAccountJSON else {
             throw StorageError.missingConfiguration
@@ -31,7 +31,7 @@ class StorageService: ObservableObject {
         )
 
         // Upload screenshots
-        if let beforeData = event.screenshotBeforeClick {
+        if let beforeData = screenshotBefore {
             try await uploadToGCS(
                 bucketName: bucketName,
                 objectName: "\(event.id.uuidString)/screenshot_before.png",
@@ -40,7 +40,7 @@ class StorageService: ObservableObject {
             )
         }
 
-        if let afterData = event.screenshotAfterClick {
+        if let afterData = screenshotAfter {
             try await uploadToGCS(
                 bucketName: bucketName,
                 objectName: "\(event.id.uuidString)/screenshot_after.png",

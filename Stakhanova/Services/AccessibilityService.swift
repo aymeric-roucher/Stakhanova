@@ -84,6 +84,13 @@ class AccessibilityService {
             let title = windowDict[kCGWindowName as String] as? String
             let layer = windowDict[kCGWindowLayer as String] as? Int ?? 0
 
+            // Get bundle identifier from owner PID
+            var bundleIdentifier: String?
+            if let ownerPID = windowDict[kCGWindowOwnerPID as String] as? Int32 {
+                let runningApp = NSRunningApplication(processIdentifier: pid_t(ownerPID))
+                bundleIdentifier = runningApp?.bundleIdentifier
+            }
+
             // Extract bounds
             var bounds = CGRect.zero
             if let boundsDict = windowDict[kCGWindowBounds as String] as? [String: Any] {
@@ -98,7 +105,7 @@ class AccessibilityService {
             return WindowInfo(
                 title: title,
                 ownerName: ownerName,
-                bundleIdentifier: nil, // Not available in window info
+                bundleIdentifier: bundleIdentifier,
                 bounds: bounds,
                 layer: layer
             )

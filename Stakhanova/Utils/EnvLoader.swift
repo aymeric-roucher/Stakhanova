@@ -11,23 +11,31 @@ class EnvLoader {
     private func loadEnvFile() {
         // Try to find .env file in project directory
         let possiblePaths = [
-            // Running from Xcode
+            // Running from Xcode - current directory
             FileManager.default.currentDirectoryPath + "/.env",
+            // Project root (when running from Xcode)
+            "/Users/aymeric/Documents/Code/Stakhanova/.env",
             // Running from app bundle
             Bundle.main.bundlePath + "/../../../../../../.env",
             // Relative to bundle
             (Bundle.main.bundlePath as NSString).deletingLastPathComponent + "/.env"
         ]
 
+        print("EnvLoader: Searching for .env file...")
+        print("EnvLoader: Current directory: \(FileManager.default.currentDirectoryPath)")
+        print("EnvLoader: Bundle path: \(Bundle.main.bundlePath)")
+
         for path in possiblePaths {
+            print("EnvLoader: Checking path: \(path)")
             if let contents = try? String(contentsOfFile: path, encoding: .utf8) {
                 parseEnvFile(contents)
-                print("Loaded .env from: \(path)")
+                print("EnvLoader: Successfully loaded .env from: \(path)")
+                print("EnvLoader: Loaded \(envVariables.count) variables: \(Array(envVariables.keys))")
                 return
             }
         }
 
-        print("Warning: .env file not found")
+        print("EnvLoader: Warning - .env file not found in any of the checked paths")
     }
 
     private func parseEnvFile(_ contents: String) {

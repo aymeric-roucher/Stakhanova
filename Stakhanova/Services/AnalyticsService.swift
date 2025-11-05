@@ -27,25 +27,45 @@ class AnalyticsService: ObservableObject {
     }
 
     private init() {
-        // Load initial values from UserDefaults
-        self.apiKey = userDefaults.string(forKey: apiKeyKey)
+        // Load initial values from UserDefaults or .env
 
+        // Check if provider is set in UserDefaults
         if let rawValue = userDefaults.string(forKey: apiProviderKey),
            let provider = LLMProvider(rawValue: rawValue) {
             self.apiProvider = provider
+        } else if EnvLoader.shared.get("HF_TOKEN") != nil {
+            // If HF_TOKEN exists in .env, default to HuggingFace
+            self.apiProvider = .huggingface
+        } else if EnvLoader.shared.get("OPENAI_API_KEY") != nil {
+            // If OPENAI_API_KEY exists in .env, default to OpenAI
+            self.apiProvider = .openai
         } else {
+            // Otherwise default to OpenAI
             self.apiProvider = .openai
         }
 
-        self.selectedModel = userDefaults.string(forKey: modelKey)
+        // Load API key from UserDefaults (user-set key overrides .env)
+        self.apiKey = userDefaults.string(forKey: apiKeyKey)
+
+        // Load or set default model
+        if let savedModel = userDefaults.string(forKey: modelKey) {
+            self.selectedModel = savedModel
+        } else {
+            // Auto-select first model for the provider
+            self.selectedModel = self.apiProvider.availableModels.first?.id
+        }
     }
 
     /// Analyze a session folder with batch processing
-    func analyzeSession(sessionPath: URL, progressCallback: @escaping (Double) -> Void) async throws -> [AppUsageEntry] {
+    func analyzeSession(sessionPath: URL, progressCallback: @escaping (Double) -> Void, logCallback: @escaping (String) -> Void) async throws -> [AppUsageEntry] {
+        logCallback("Scanning session folder...")
+
         // Load all metadata files
         let metadataFiles = try FileManager.default.contentsOfDirectory(at: sessionPath, includingPropertiesForKeys: nil)
             .filter { $0.lastPathComponent.contains("metadata.json") }
             .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+
+        logCallback("Found \(metadataFiles.count) events to analyze")
 
         guard !metadataFiles.isEmpty else {
             throw AnalyticsError.noEventsFound
@@ -57,9 +77,13 @@ class AnalyticsService: ObservableObject {
             Array(metadataFiles[$0..<min($0 + batchSize, metadataFiles.count)])
         }
 
+        logCallback("Processing \(batches.count) batches (batch size: \(batchSize))")
+
         var allResults: [AppUsageEntry] = []
 
         for (index, batch) in batches.enumerated() {
+            logCallback("Processing batch \(index + 1)/\(batches.count)")
+
             // Load screenshot pairs and metadata for this batch
             var batchData: [(before: Data?, after: Data?, metadata: ClickEvent)] = []
 
@@ -81,9 +105,14 @@ class AnalyticsService: ObservableObject {
                 batchData.append((before: beforeData, after: afterData, metadata: metadata))
             }
 
+            logCallback("Loaded \(batchData.count) events in batch")
+
             // Analyze this batch
-            let batchResult = try await analyzeBatch(batchData: batchData, batchNumber: index + 1, totalBatches: batches.count)
+            logCallback("Calling LLM API for batch \(index + 1)...")
+            let batchResult = try await analyzeBatch(batchData: batchData, batchNumber: index + 1, totalBatches: batches.count, logCallback: logCallback)
             allResults.append(contentsOf: batchResult.apps)
+
+            logCallback("Batch \(index + 1) complete. Found \(batchResult.apps.count) app(s)")
 
             // Update progress
             progressCallback(Double(index + 1) / Double(batches.count))
@@ -93,26 +122,29 @@ class AnalyticsService: ObservableObject {
         return aggregateAppUsage(allResults)
     }
 
+    /// Get the effective API key for the current provider
+    private func getEffectiveApiKey() -> String? {
+        switch apiProvider {
+        case .openai:
+            // User key overrides .env
+            if let key = self.apiKey, !key.isEmpty {
+                return key
+            }
+            return EnvLoader.shared.get("OPENAI_API_KEY")
+        case .huggingface:
+            // User key overrides .env
+            if let key = self.apiKey, !key.isEmpty {
+                return key
+            }
+            return EnvLoader.shared.get("HF_TOKEN")
+        }
+    }
+
     /// Analyze a batch of click events using LLM
     func analyzeClickEvents(_ events: [ClickEvent]) async throws -> AnalyticsResult {
         // Get API key based on provider
-        let apiKey: String
-        switch apiProvider {
-        case .openai:
-            // OpenAI requires manual key
-            guard let key = self.apiKey, !key.isEmpty else {
-                throw AnalyticsError.missingAPIKey
-            }
-            apiKey = key
-        case .huggingface:
-            // HuggingFace: manual key overrides env, fallback to .env
-            if let key = self.apiKey, !key.isEmpty {
-                apiKey = key
-            } else if let envKey = EnvLoader.shared.get("HF_TOKEN") {
-                apiKey = envKey
-            } else {
-                throw AnalyticsError.missingAPIKey
-            }
+        guard let apiKey = getEffectiveApiKey(), !apiKey.isEmpty else {
+            throw AnalyticsError.missingAPIKey
         }
 
         guard let model = selectedModel else {
@@ -309,34 +341,32 @@ struct OpenAIMessage: Codable {
 }
 
 extension AnalyticsService {
-    private func analyzeBatch(batchData: [(before: Data?, after: Data?, metadata: ClickEvent)], batchNumber: Int, totalBatches: Int) async throws -> AppUsageAnalysis {
+    private func analyzeBatch(batchData: [(before: Data?, after: Data?, metadata: ClickEvent)], batchNumber: Int, totalBatches: Int, logCallback: @escaping (String) -> Void) async throws -> AppUsageAnalysis {
         // Get API key
-        let apiKey: String
-        switch apiProvider {
-        case .openai:
-            guard let key = self.apiKey, !key.isEmpty else {
-                throw AnalyticsError.missingAPIKey
-            }
-            apiKey = key
-        case .huggingface:
-            if let key = self.apiKey, !key.isEmpty {
-                apiKey = key
-            } else if let envKey = EnvLoader.shared.get("HF_TOKEN") {
-                apiKey = envKey
-            } else {
-                throw AnalyticsError.missingAPIKey
-            }
+        guard let apiKey = getEffectiveApiKey(), !apiKey.isEmpty else {
+            logCallback("ERROR: No API key available")
+            throw AnalyticsError.missingAPIKey
         }
 
         guard let model = selectedModel else {
+            logCallback("ERROR: No model selected")
             throw AnalyticsError.missingModel
         }
+
+        logCallback("Building prompt for batch \(batchNumber)...")
 
         // Build prompt with structured output request
         let prompt = buildBatchAnalysisPrompt(batchData: batchData, batchNumber: batchNumber, totalBatches: totalBatches)
 
+        logCallback("Prompt size: \(prompt.count) characters")
+        logCallback("Prompt preview (first 500 chars):")
+        logCallback(String(prompt.prefix(500)))
+        logCallback("Making API request to \(apiProvider.rawValue)...")
+
         // Call LLM with structured output
-        let result = try await queryLLMWithStructuredOutput(prompt: prompt, model: model, apiKey: apiKey)
+        let result = try await queryLLMWithStructuredOutput(prompt: prompt, model: model, apiKey: apiKey, logCallback: logCallback)
+
+        logCallback("API response received successfully")
 
         return result
     }
@@ -365,14 +395,37 @@ extension AnalyticsService {
 
         for (index, data) in batchData.enumerated() {
             let metadata = data.metadata
+
+            // Calculate time since previous event
+            var timeSincePrevious = ""
+            if index > 0 {
+                let prevMetadata = batchData[index - 1].metadata
+                let timeDiff = metadata.timestamp.timeIntervalSince(prevMetadata.timestamp)
+                timeSincePrevious = String(format: " (%.1f seconds since previous)", timeDiff)
+            }
+
             prompt += """
 
-            Event \(index + 1):
+            Event \(index + 1)\(timeSincePrevious):
             - Time: \(metadata.timestamp.formatted())
-            - Active App: \(metadata.activeApp.name)
-            - Clicked Element: \(metadata.clickedElement?.title ?? metadata.clickedElement?.label ?? "N/A")
-
+            - Active App: \(metadata.activeApp.name) (bundle: \(metadata.activeApp.bundleIdentifier ?? "unknown"))
+            - Mouse Position: (\(Int(metadata.mousePosition.x)), \(Int(metadata.mousePosition.y)))
             """
+
+            if let element = metadata.clickedElement {
+                prompt += "\n- Clicked Element: role=\(element.role ?? "nil"), title=\(element.title ?? "nil"), label=\(element.label ?? "nil"), description=\(element.description ?? "nil"), value=\(element.value ?? "nil")"
+            }
+
+            if !metadata.modifierFlags.isEmpty {
+                prompt += "\n- Modifier Keys: \(metadata.modifierFlags.joined(separator: ", "))"
+            }
+
+            if !metadata.openWindows.isEmpty {
+                let windowNames = metadata.openWindows.prefix(5).compactMap { $0.ownerName }.joined(separator: ", ")
+                prompt += "\n- Open Windows: \(windowNames)"
+            }
+
+            prompt += "\n"
         }
 
         prompt += """
@@ -388,17 +441,20 @@ extension AnalyticsService {
         return prompt
     }
 
-    private func queryLLMWithStructuredOutput(prompt: String, model: String, apiKey: String) async throws -> AppUsageAnalysis {
+    private func queryLLMWithStructuredOutput(prompt: String, model: String, apiKey: String, logCallback: @escaping (String) -> Void) async throws -> AppUsageAnalysis {
         switch apiProvider {
         case .openai:
-            return try await queryOpenAIStructured(prompt: prompt, model: model, apiKey: apiKey)
+            return try await queryOpenAIStructured(prompt: prompt, model: model, apiKey: apiKey, logCallback: logCallback)
         case .huggingface:
-            return try await queryHuggingFaceStructured(prompt: prompt, model: model, apiKey: apiKey)
+            return try await queryHuggingFaceStructured(prompt: prompt, model: model, apiKey: apiKey, logCallback: logCallback)
         }
     }
 
-    private func queryOpenAIStructured(prompt: String, model: String, apiKey: String) async throws -> AppUsageAnalysis {
+    private func queryOpenAIStructured(prompt: String, model: String, apiKey: String, logCallback: @escaping (String) -> Void) async throws -> AppUsageAnalysis {
         let url = URL(string: "https://api.openai.com/v1/chat/completions")!
+        logCallback("Request URL: \(url)")
+        logCallback("Model: \(model)")
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -442,30 +498,45 @@ extension AnalyticsService {
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
+        logCallback("Sending request...")
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
+            logCallback("ERROR: Invalid HTTP response")
             throw AnalyticsError.apiRequestFailed
         }
 
+        logCallback("Response status: \(httpResponse.statusCode)")
+        logCallback("Response size: \(data.count) bytes")
+
         guard httpResponse.statusCode == 200 else {
             if let errorString = String(data: data, encoding: .utf8) {
-                print("OpenAI API error: \(errorString)")
+                logCallback("API Error: \(errorString)")
             }
             throw AnalyticsError.apiRequestFailed
         }
 
+        logCallback("Parsing response...")
         let result = try JSONDecoder().decode(OpenAIResponse.self, from: data)
         guard let content = result.choices.first?.message.content else {
+            logCallback("ERROR: No content in response")
             throw AnalyticsError.apiRequestFailed
         }
 
+        logCallback("LLM Response:")
+        logCallback(content)
+        logCallback("---")
+
+        logCallback("Decoding app usage data...")
         return try JSONDecoder().decode(AppUsageAnalysis.self, from: content.data(using: .utf8)!)
     }
 
-    private func queryHuggingFaceStructured(prompt: String, model: String, apiKey: String) async throws -> AppUsageAnalysis {
+    private func queryHuggingFaceStructured(prompt: String, model: String, apiKey: String, logCallback: @escaping (String) -> Void) async throws -> AppUsageAnalysis {
         // HuggingFace: Use same approach but without response_format (will parse from content)
         let url = URL(string: "https://router.huggingface.co/v1/chat/completions")!
+        logCallback("Request URL: \(url)")
+        logCallback("Model: \(model)")
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -483,24 +554,36 @@ extension AnalyticsService {
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
+        logCallback("Sending request...")
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
+            logCallback("ERROR: Invalid HTTP response")
             throw AnalyticsError.apiRequestFailed
         }
 
+        logCallback("Response status: \(httpResponse.statusCode)")
+        logCallback("Response size: \(data.count) bytes")
+
         guard httpResponse.statusCode == 200 else {
             if let errorString = String(data: data, encoding: .utf8) {
-                print("HuggingFace API error: \(errorString)")
+                logCallback("API Error: \(errorString)")
             }
             throw AnalyticsError.apiRequestFailed
         }
 
+        logCallback("Parsing response...")
         let result = try JSONDecoder().decode(OpenAIResponse.self, from: data)
         guard let content = result.choices.first?.message.content else {
+            logCallback("ERROR: No content in response")
             throw AnalyticsError.apiRequestFailed
         }
 
+        logCallback("LLM Response:")
+        logCallback(content)
+        logCallback("---")
+
+        logCallback("Decoding app usage data...")
         // Parse JSON from content
         return try JSONDecoder().decode(AppUsageAnalysis.self, from: content.data(using: .utf8)!)
     }

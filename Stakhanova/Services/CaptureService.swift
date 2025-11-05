@@ -43,12 +43,10 @@ class CaptureService {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             let screenshotAfter = self?.captureScreen()
 
-            // Create click event with all captured data
+            // Create click event with metadata only
             let event = ClickEvent(
                 timestamp: Date(),
                 mousePosition: mousePosition,
-                screenshotBeforeClick: screenshotBefore,
-                screenshotAfterClick: screenshotAfter,
                 activeApp: activeApp,
                 clickedElement: clickedElement,
                 openWindows: openWindows,
@@ -56,8 +54,8 @@ class CaptureService {
                 modifierFlags: modifierFlags
             )
 
-            // Save to local storage and upload
-            self?.saveClickEvent(event)
+            // Save to local storage with screenshots as separate files
+            self?.saveClickEvent(event, screenshotBefore: screenshotBefore, screenshotAfter: screenshotAfter)
         }
     }
 
@@ -84,10 +82,10 @@ class CaptureService {
     }
 
     /// Save click event locally
-    private func saveClickEvent(_ event: ClickEvent) {
+    private func saveClickEvent(_ event: ClickEvent, screenshotBefore: Data?, screenshotAfter: Data?) {
         // Save locally
         let localPath = getLocalStoragePath()
-        saveEventLocally(event, to: localPath)
+        saveEventLocally(event, screenshotBefore: screenshotBefore, screenshotAfter: screenshotAfter, to: localPath)
         print("Saved click event at \(localPath.path)")
     }
 
@@ -106,7 +104,7 @@ class CaptureService {
         return appDir
     }
 
-    private func saveEventLocally(_ event: ClickEvent, to directory: URL) {
+    private func saveEventLocally(_ event: ClickEvent, screenshotBefore: Data?, screenshotAfter: Data?, to directory: URL) {
         // Create timestamp string for filenames
         let timestamp = ISO8601DateFormatter().string(from: event.timestamp).replacingOccurrences(of: ":", with: "-")
 
@@ -121,12 +119,12 @@ class CaptureService {
         }
 
         // Save screenshots with timestamp
-        if let beforeData = event.screenshotBeforeClick {
+        if let beforeData = screenshotBefore {
             let beforePath = directory.appendingPathComponent("\(timestamp)_before.png")
             try? beforeData.write(to: beforePath)
         }
 
-        if let afterData = event.screenshotAfterClick {
+        if let afterData = screenshotAfter {
             let afterPath = directory.appendingPathComponent("\(timestamp)_after.png")
             try? afterData.write(to: afterPath)
         }

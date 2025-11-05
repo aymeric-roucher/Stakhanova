@@ -17,7 +17,6 @@
 		A1000008000000000000001 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000008000000000000001 /* SettingsView.swift */; };
 		A1000009000000000000001 /* EnvLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000010000000000000001 /* EnvLoader.swift */; };
 		A1000010000000000000002 /* AnalyticsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000011000000000000001 /* AnalyticsModels.swift */; };
-		A1000011000000000000002 /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000012000000000000001 /* AnalyticsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -33,7 +32,6 @@
 		B1000009000000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B1000010000000000000001 /* EnvLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvLoader.swift; sourceTree = "<group>"; };
 		B1000011000000000000001 /* AnalyticsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsModels.swift; sourceTree = "<group>"; };
-		B1000012000000000000001 /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -101,7 +99,6 @@
 			isa = PBXGroup;
 			children = (
 				B1000008000000000000001 /* SettingsView.swift */,
-				B1000012000000000000001 /* AnalyticsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -187,7 +184,6 @@
 				A1000008000000000000001 /* SettingsView.swift in Sources */,
 				A1000009000000000000001 /* EnvLoader.swift in Sources */,
 				A1000010000000000000002 /* AnalyticsModels.swift in Sources */,
-				A1000011000000000000002 /* AnalyticsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

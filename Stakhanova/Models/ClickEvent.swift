@@ -1,15 +1,11 @@
 import Foundation
 import AppKit
 
-/// Captures all context about a click event
+/// Captures all context about a click event (metadata only - screenshots saved separately)
 struct ClickEvent: Codable, Identifiable {
     let id: UUID
     let timestamp: Date
     let mousePosition: CGPoint
-
-    // Screenshot data
-    let screenshotBeforeClick: Data?
-    let screenshotAfterClick: Data?
 
     // Active application info
     let activeApp: AppInfo
@@ -27,8 +23,6 @@ struct ClickEvent: Codable, Identifiable {
     init(
         timestamp: Date = Date(),
         mousePosition: CGPoint,
-        screenshotBeforeClick: Data? = nil,
-        screenshotAfterClick: Data? = nil,
         activeApp: AppInfo,
         clickedElement: AccessibilityElement? = nil,
         openWindows: [WindowInfo] = [],
@@ -38,8 +32,6 @@ struct ClickEvent: Codable, Identifiable {
         self.id = UUID()
         self.timestamp = timestamp
         self.mousePosition = mousePosition
-        self.screenshotBeforeClick = screenshotBeforeClick
-        self.screenshotAfterClick = screenshotAfterClick
         self.activeApp = activeApp
         self.clickedElement = clickedElement
         self.openWindows = openWindows
@@ -69,4 +61,50 @@ struct WindowInfo: Codable {
     let bundleIdentifier: String?
     let bounds: CGRect
     let layer: Int
+
+    enum CodingKeys: String, CodingKey {
+        case title, ownerName, bundleIdentifier, bounds, layer
+    }
+
+    // Regular initializer
+    init(title: String?, ownerName: String?, bundleIdentifier: String?, bounds: CGRect, layer: Int) {
+        self.title = title
+        self.ownerName = ownerName
+        self.bundleIdentifier = bundleIdentifier
+        self.bounds = bounds
+        self.layer = layer
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        ownerName = try container.decodeIfPresent(String.self, forKey: .ownerName)
+        bundleIdentifier = try container.decodeIfPresent(String.self, forKey: .bundleIdentifier)
+        layer = try container.decode(Int.self, forKey: .layer)
+
+        // Decode bounds from array format [[x, y], [width, height]]
+        let boundsArray = try container.decode([[CGFloat]].self, forKey: .bounds)
+        if boundsArray.count == 2 && boundsArray[0].count == 2 && boundsArray[1].count == 2 {
+            let origin = CGPoint(x: boundsArray[0][0], y: boundsArray[0][1])
+            let size = CGSize(width: boundsArray[1][0], height: boundsArray[1][1])
+            bounds = CGRect(origin: origin, size: size)
+        } else {
+            throw DecodingError.dataCorruptedError(forKey: .bounds, in: container, debugDescription: "Bounds array format is invalid")
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(title, forKey: .title)
+        try container.encodeIfPresent(ownerName, forKey: .ownerName)
+        try container.encodeIfPresent(bundleIdentifier, forKey: .bundleIdentifier)
+        try container.encode(layer, forKey: .layer)
+
+        // Encode bounds as array format [[x, y], [width, height]]
+        let boundsArray = [
+            [bounds.origin.x, bounds.origin.y],
+            [bounds.size.width, bounds.size.height]
+        ]
+        try container.encode(boundsArray, forKey: .bounds)
+    }
 }
