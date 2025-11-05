@@ -3,6 +3,23 @@ import ScreenCaptureKit
 
 class CaptureService {
     private let storageService = StorageService()
+    private var sessionFolder: String?
+    private let computerID: String = {
+        var size = 0
+        sysctlbyname("kern.uuid", nil, &size, nil, 0)
+        var uuid = [CChar](repeating: 0, count: size)
+        sysctlbyname("kern.uuid", &uuid, &size, nil, 0)
+        return String(cString: uuid)
+    }()
+
+    func startSession() {
+        let timestamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        sessionFolder = "\(timestamp)_\(computerID)"
+    }
+
+    func endSession() {
+        sessionFolder = nil
+    }
 
     /// Capture a click event with all context
     func captureClickEvent(mousePosition: CGPoint, modifierFlags: [String]) {
@@ -67,26 +84,22 @@ class CaptureService {
         return pngData
     }
 
-    /// Save click event locally and upload to cloud
+    /// Save click event locally
     private func saveClickEvent(_ event: ClickEvent) {
-        // Save locally first
+        // Save locally
         let localPath = getLocalStoragePath()
         saveEventLocally(event, to: localPath)
-
-        // Upload to Google Cloud Storage
-        Task {
-            do {
-                try await storageService.uploadClickEvent(event)
-                print("Successfully uploaded click event \(event.id)")
-            } catch {
-                print("Failed to upload click event: \(error)")
-            }
-        }
+        print("Saved click event at \(localPath.path)")
     }
 
     private func getLocalStoragePath() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appDir = appSupport.appendingPathComponent("Stakhanova", isDirectory: true)
+        var appDir = appSupport.appendingPathComponent("Stakhanova", isDirectory: true)
+
+        // Add session folder if active
+        if let session = sessionFolder {
+            appDir = appDir.appendingPathComponent(session, isDirectory: true)
+        }
 
         // Create directory if it doesn't exist
         try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
@@ -95,8 +108,8 @@ class CaptureService {
     }
 
     private func saveEventLocally(_ event: ClickEvent, to directory: URL) {
-        let eventDir = directory.appendingPathComponent(event.id.uuidString, isDirectory: true)
-        try? FileManager.default.createDirectory(at: eventDir, withIntermediateDirectories: true)
+        // Create timestamp string for filenames
+        let timestamp = ISO8601DateFormatter().string(from: event.timestamp).replacingOccurrences(of: ":", with: "-")
 
         // Save metadata as JSON
         let encoder = JSONEncoder()
@@ -104,18 +117,18 @@ class CaptureService {
         encoder.outputFormatting = .prettyPrinted
 
         if let jsonData = try? encoder.encode(event) {
-            let metadataPath = eventDir.appendingPathComponent("metadata.json")
+            let metadataPath = directory.appendingPathComponent("\(timestamp)_metadata.json")
             try? jsonData.write(to: metadataPath)
         }
 
-        // Save screenshots separately
+        // Save screenshots with timestamp
         if let beforeData = event.screenshotBeforeClick {
-            let beforePath = eventDir.appendingPathComponent("screenshot_before.png")
+            let beforePath = directory.appendingPathComponent("\(timestamp)_before.png")
             try? beforeData.write(to: beforePath)
         }
 
         if let afterData = event.screenshotAfterClick {
-            let afterPath = eventDir.appendingPathComponent("screenshot_after.png")
+            let afterPath = directory.appendingPathComponent("\(timestamp)_after.png")
             try? afterData.write(to: afterPath)
         }
     }

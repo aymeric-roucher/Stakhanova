@@ -39,6 +39,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func setupMenu() {
         let menu = NSMenu()
+        menu.autoenablesItems = false
 
         startMenuItem = NSMenuItem(title: "Start Monitoring", action: #selector(startMonitoring), keyEquivalent: "s")
         startMenuItem?.target = self
@@ -49,10 +50,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(startMenuItem!)
         menu.addItem(stopMenuItem!)
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Open Captures Folder", action: #selector(openCapturesFolder), keyEquivalent: "o"))
-        menu.addItem(NSMenuItem(title: "Analyze Screenshots", action: #selector(analyzeScreenshots), keyEquivalent: "a"))
+
+        let openFolderItem = NSMenuItem(title: "Open Captures Folder", action: #selector(openCapturesFolder), keyEquivalent: "o")
+        openFolderItem.target = self
+        menu.addItem(openFolderItem)
+
+        let analyzeItem = NSMenuItem(title: "Analyze Screenshots", action: #selector(analyzeScreenshots), keyEquivalent: "a")
+        analyzeItem.target = self
+        menu.addItem(analyzeItem)
+
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ","))
+
+        let settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
@@ -62,6 +74,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func startMonitoring() {
+        captureService?.startSession()
         eventMonitor?.start()
         updateMenuItems()
         print("Started monitoring clicks")
@@ -69,6 +82,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func stopMonitoring() {
         eventMonitor?.stop()
+        captureService?.endSession()
         updateMenuItems()
         print("Stopped monitoring clicks")
     }
@@ -81,6 +95,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         updateMenuItems()
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        let isRunning = eventMonitor?.isRunning ?? false
+        print("validateMenuItem called - isRunning: \(isRunning)")
+
+        if menuItem == startMenuItem {
+            print("Validating Start - should be enabled: \(!isRunning)")
+            return !isRunning
+        }
+
+        if menuItem == stopMenuItem {
+            print("Validating Stop - should be enabled: \(isRunning)")
+            return isRunning
+        }
+
+        return true
     }
 
     @objc func openCapturesFolder() {
