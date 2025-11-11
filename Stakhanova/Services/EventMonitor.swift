@@ -59,13 +59,25 @@ class EventMonitor {
 
     private func handleClick(_ event: NSEvent) {
         let mouseLocation = NSEvent.mouseLocation
+
+        // Convert from AppKit coordinates (bottom-left origin) to CGDisplay coordinates (top-left origin)
+        guard let screen = NSScreen.main else {
+            print("ERROR: No main screen available for click detection")
+            return
+        }
+        let cgPoint = CGPoint(
+            x: mouseLocation.x,
+            y: screen.frame.height - mouseLocation.y
+        )
+
         let modifiers = extractModifierFlags(from: event.modifierFlags)
 
-        print("Click detected at: \(mouseLocation)")
+        print("Click detected at: \(cgPoint) (AppKit: \(mouseLocation))")
+        print("Triggering captureClickEvent...")
 
         // Capture screenshot immediately
         captureService.captureClickEvent(
-            mousePosition: mouseLocation,
+            mousePosition: cgPoint,
             modifierFlags: modifiers
         )
     }

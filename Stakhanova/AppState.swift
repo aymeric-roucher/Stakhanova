@@ -5,31 +5,21 @@ import Combine
 class AppState: ObservableObject {
     static let shared = AppState()
 
-    /// Whether monitoring is currently active
-    @Published var isMonitoring: Bool = false {
-        didSet {
-            // Persist to UserDefaults whenever it changes
-            UserDefaults.standard.set(isMonitoring, forKey: "isMonitoring")
-        }
+    @Published var isMonitoring: Bool {
+        didSet { UserDefaults.standard.set(isMonitoring, forKey: "isMonitoring") }
     }
 
-    /// Whether to add click marker on screenshots
-    @Published var addClickMarker: Bool = true {
-        didSet {
-            // Persist to UserDefaults whenever it changes
-            UserDefaults.standard.set(addClickMarker, forKey: "addClickMarker")
-        }
+    @Published var addClickMarker: Bool {
+        didSet { UserDefaults.standard.set(addClickMarker, forKey: "addClickMarker") }
     }
 
     private init() {
-        // Restore saved state
-        isMonitoring = UserDefaults.standard.bool(forKey: "isMonitoring")
+        // Always start stopped - monitoring state should not persist across app launches
+        self.isMonitoring = false
 
-        // Restore click marker setting (default to true if not set)
-        if UserDefaults.standard.object(forKey: "addClickMarker") != nil {
-            addClickMarker = UserDefaults.standard.bool(forKey: "addClickMarker")
-        } else {
-            addClickMarker = true
-        }
+        // Restore other settings
+        self.addClickMarker = UserDefaults.standard.object(forKey: "addClickMarker") != nil
+            ? UserDefaults.standard.bool(forKey: "addClickMarker")
+            : true
     }
 }

@@ -23,11 +23,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     var toggleMenuItem: NSMenuItem?
     var settingsWindow: NSWindow?
+    var monitoringStatusWindow: NSWindow?
     private var monitoringStateSub: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Initialize services
-        captureService = CaptureService()
+        captureService = CaptureService.shared
         eventMonitor = EventMonitor(captureService: captureService!)
 
         // Create menu bar item
@@ -97,7 +98,42 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         monitoringStateSub = AppState.shared.$isMonitoring.sink { [weak self] isMonitoring in
             guard let self = self else { return }
             self.toggleMenuItem?.title = isMonitoring ? "Stop Monitoring" : "Start Monitoring"
+
+            // Monitoring window disabled - causes layout recursion
+            // TODO: Fix and re-enable
         }
+    }
+
+    private func showMonitoringStatusWindow() {
+        if monitoringStatusWindow == nil {
+            let statusView = MonitoringStatusWindow()
+            let hostingController = NSHostingController(rootView: statusView)
+
+            let window = NSWindow(contentViewController: hostingController)
+            window.title = "Stakhanova - Monitoring"
+            window.styleMask = [.titled, .closable]
+            window.level = .normal  // Changed from .floating to avoid layout issues
+            window.isReleasedWhenClosed = false
+
+            // Position in top-right corner
+            if let screen = NSScreen.main {
+                let screenFrame = screen.visibleFrame
+                let windowSize = NSSize(width: 400, height: 500)
+                let origin = NSPoint(
+                    x: screenFrame.maxX - windowSize.width - 20,
+                    y: screenFrame.maxY - windowSize.height - 20
+                )
+                window.setFrame(NSRect(origin: origin, size: windowSize), display: true)
+            }
+
+            monitoringStatusWindow = window
+        }
+
+        monitoringStatusWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    private func hideMonitoringStatusWindow() {
+        monitoringStatusWindow?.orderOut(nil)
     }
 
     @objc func toggleMonitoring() {

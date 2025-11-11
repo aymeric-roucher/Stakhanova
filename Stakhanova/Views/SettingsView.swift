@@ -37,7 +37,9 @@ struct SettingsView: View {
             loadSessions()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SessionEnded"))) { _ in
-            loadSessions()
+            DispatchQueue.main.async {
+                loadSessions()
+            }
         }
         .sheet(isPresented: $showZoomWindow) {
             if let image = zoomedImage {

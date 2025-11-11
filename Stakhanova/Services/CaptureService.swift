@@ -1,11 +1,18 @@
 import Cocoa
 import ScreenCaptureKit
 import CoreGraphics
-import CryptoKit
+import CoreMedia
 
-class CaptureService {
+class CaptureService: NSObject, SCStreamDelegate, SCStreamOutput {
+    static let shared = CaptureService()
+
     private var sessionFolder: String?
-    private var isCancelled = false
+    private var stream: SCStream?
+    private var frameBuffer: [CMSampleBuffer] = [] // Keep last 3 frames
+    private let maxBufferSize = 3
+    private let streamQueue = DispatchQueue(label: "com.stakhanova.streamQueue")
+    private let bufferQueue = DispatchQueue(label: "com.stakhanova.bufferQueue")
+
     private let computerID: String = {
         var size = 0
         sysctlbyname("kern.uuid", nil, &size, nil, 0)
@@ -14,27 +21,118 @@ class CaptureService {
         return String(cString: uuid)
     }()
 
+    var currentSessionFolder: String? {
+        return sessionFolder
+    }
+
     func startSession() {
         let timestamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
         sessionFolder = "\(timestamp)_\(computerID)"
-        isCancelled = false
+
+        // Start ScreenCaptureKit stream
+        Task {
+            await startStream()
+        }
     }
 
     func endSession() {
-        isCancelled = true
         sessionFolder = nil
+
+        // Stop stream
+        Task {
+            await stopStream()
+        }
+    }
+
+    // MARK: - ScreenCaptureKit Stream Management
+
+    private func startStream() async {
+        do {
+            // Get available content
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+
+            guard let display = content.displays.first else {
+                print("ERROR: No displays found")
+                return
+            }
+
+            // Create filter (capture entire display)
+            let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+
+            // Configure stream
+            let config = SCStreamConfiguration()
+            config.width = display.width
+            config.height = display.height
+            config.minimumFrameInterval = CMTime(value: 1, timescale: 30) // 30 FPS
+            config.pixelFormat = kCVPixelFormatType_32BGRA
+
+            // Create and start stream
+            stream = SCStream(filter: filter, configuration: config, delegate: self)
+            try stream?.addStreamOutput(self, type: .screen, sampleHandlerQueue: streamQueue)
+            try await stream?.startCapture()
+
+            print("ScreenCaptureKit stream started successfully")
+        } catch let error as NSError {
+            if error.domain == "com.apple.ScreenCaptureKit.SCStreamErrorDomain" && error.code == -3801 {
+                print("ERROR: Screen recording permission denied!")
+                print("Please grant screen recording permission in System Settings > Privacy & Security > Screen Recording")
+                print("Then restart Stakhanova")
+            } else {
+                print("ERROR: Failed to start stream: \(error)")
+            }
+        }
+    }
+
+    private func stopStream() async {
+        do {
+            try await stream?.stopCapture()
+            stream = nil
+            bufferQueue.sync {
+                frameBuffer.removeAll()
+            }
+            print("ScreenCaptureKit stream stopped")
+        } catch {
+            print("Failed to stop stream: \(error)")
+        }
+    }
+
+    // MARK: - SCStreamOutput
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        // Keep a buffer of the last 3 frames
+        bufferQueue.sync {
+            frameBuffer.append(sampleBuffer)
+            if frameBuffer.count > maxBufferSize {
+                frameBuffer.removeFirst()
+            }
+            if frameBuffer.count == 1 {
+                print("Frame buffer received first frame - ready to capture")
+            }
+        }
+    }
+
+    // MARK: - SCStreamDelegate
+
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        print("Stream stopped with error: \(error)")
+
+        // User clicked "Stop Sharing" in macOS menu - sync monitoring state
+        DispatchQueue.main.async {
+            if AppState.shared.isMonitoring {
+                print("User stopped screen sharing from macOS menu - stopping monitoring")
+                AppState.shared.isMonitoring = false
+            }
+        }
     }
 
     /// Capture a click event with all context
     func captureClickEvent(mousePosition: CGPoint, modifierFlags: [String]) {
-        // Capture screenshot immediately (before click effect)
-        let screenshotBefore = captureScreen()
+        // Capture screenshot from n-1 frame (previous frame, before the click)
+        let screenshotBefore = captureFrameFromBuffer(offset: 1)
+        print("Captured before screenshot: \(screenshotBefore.count) bytes")
 
         // Get active app
-        guard let activeApp = AccessibilityService.getActiveApp() else {
-            print("Could not get active app")
-            return
-        }
+        let activeApp = AccessibilityService.getActiveApp()!
 
         // Get clicked element info
         let clickedElement = AccessibilityService.getElementAtPoint(mousePosition)
@@ -43,8 +141,12 @@ class CaptureService {
         let openWindows = AccessibilityService.getAllOpenWindows()
         let runningApps = AccessibilityService.getAllRunningApps()
 
-        // Wait for screen to stabilize (3 identical captures = stable)
-        waitForScreenStability(baseline: screenshotBefore, maxWait: 1.0) { [weak self] screenshotAfter in
+        // Wait 500ms and capture again (after click effect)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self = self else { return }
+            let screenshotAfter = self.captureFrameFromBuffer(offset: 0)
+            print("Captured after screenshot: \(screenshotAfter.count) bytes")
+
             // Create click event with metadata only
             let event = ClickEvent(
                 timestamp: Date(),
@@ -57,101 +159,47 @@ class CaptureService {
             )
 
             // Save to local storage with screenshots as separate files
-            self?.saveClickEvent(event, screenshotBefore: screenshotBefore, screenshotAfter: screenshotAfter)
+            self.saveClickEvent(event, screenshotBefore: screenshotBefore, screenshotAfter: screenshotAfter)
         }
     }
 
-    /// Wait for screen stability: captures every 100ms, stops when 3 consecutive identical screenshots
-    private func waitForScreenStability(baseline: Data?, maxWait: TimeInterval, completion: @escaping (Data?) -> Void) {
-        let startTime = Date()
-        let captureInterval: TimeInterval = 0.1 // Capture every 100ms
-        var captureHistory: [(data: Data, hash: String)] = [] // Keep last 3 captures with hashes
+    /// Capture frame from buffer with offset (0 = latest, 1 = previous, 2 = n-2)
+    private func captureFrameFromBuffer(offset: Int) -> Data {
+        // Process the sample buffer entirely within the sync block to avoid invalidation
+        return bufferQueue.sync {
+            assert(!frameBuffer.isEmpty, "Frame buffer is empty - ScreenCaptureKit stream may not have started yet or failed to start. Check screen recording permissions.")
 
-        func captureAndCheck() {
-            // Check if cancelled (session ended)
-            if self.isCancelled {
-                print("Screenshot capture cancelled (session ended)")
-                return
+            let index = max(0, frameBuffer.count - 1 - offset)
+            let sampleBuffer = frameBuffer.indices.contains(index) ? frameBuffer[index] : frameBuffer.last!
+
+            guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+                fatalError("Failed to get image buffer from sample buffer")
             }
 
-            let elapsed = Date().timeIntervalSince(startTime)
+            // Lock the pixel buffer
+            CVPixelBufferLockBaseAddress(imageBuffer, .readOnly)
+            defer { CVPixelBufferUnlockBaseAddress(imageBuffer, .readOnly) }
 
-            // Check timeout
-            if elapsed >= maxWait {
-                let finalCapture = captureHistory.last?.data ?? self.captureScreen()
-                print("Screenshot capture timed out after \(String(format: "%.2f", elapsed))s")
-                completion(finalCapture)
-                return
+            // Create CGImage from pixel buffer
+            let ciImage = CIImage(cvPixelBuffer: imageBuffer)
+            let context = CIContext()
+            guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else {
+                fatalError("Failed to create CGImage from pixel buffer")
             }
 
-            // Capture current screen
-            guard let currentData = self.captureScreen() else {
-                // Failed to capture, try again
-                DispatchQueue.main.asyncAfter(deadline: .now() + captureInterval) {
-                    captureAndCheck()
-                }
-                return
+            // Convert to PNG
+            let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
+            guard let pngData = bitmapRep.representation(using: .png, properties: [:]) else {
+                fatalError("Failed to convert image to PNG")
             }
 
-            // Compute hash for efficient comparison
-            let hash = SHA256.hash(data: currentData)
-            let hashString = hash.compactMap { String(format: "%02x", $0) }.joined()
-
-            // Add to history (keep only last 3)
-            captureHistory.append((data: currentData, hash: hashString))
-            if captureHistory.count > 3 {
-                captureHistory.removeFirst()
-            }
-
-            // Check if we have 3 identical screenshots (by hash)
-            if captureHistory.count == 3 {
-                let hash1 = captureHistory[0].hash
-                let hash2 = captureHistory[1].hash
-                let hash3 = captureHistory[2].hash
-
-                if hash1 == hash2 && hash2 == hash3 {
-                    // Screen stable! (3 identical captures = 200ms of stability)
-                    print("Screenshot captured after \(String(format: "%.2f", elapsed))s (screen stable)")
-                    completion(captureHistory[2].data)
-                    return
-                }
-            }
-
-            // Not stable yet, capture again
-            DispatchQueue.main.asyncAfter(deadline: .now() + captureInterval) {
-                captureAndCheck()
-            }
+            return pngData
         }
-
-        // Start capturing
-        captureAndCheck()
-    }
-
-    /// Capture the entire screen using CGDisplayCreateImage (most compatible)
-    private func captureScreen() -> Data? {
-        // Use the main display ID
-        let displayID = CGMainDisplayID()
-
-        // Create image of the display
-        guard let cgImage = CGDisplayCreateImage(displayID) else {
-            print("Failed to capture screen")
-            print("Make sure Screen Recording permission is granted in System Settings > Privacy & Security > Screen Recording")
-            return nil
-        }
-
-        // Convert CGImage to PNG data
-        let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
-        guard let pngData = bitmapRep.representation(using: .png, properties: [:]) else {
-            print("Failed to convert screenshot to PNG")
-            return nil
-        }
-
-        return pngData
     }
 
     /// Draw a circle and cross at the specified point on an image
-    static func annotateImageWithClickMarker(_ imageData: Data, at point: CGPoint) -> Data? {
-        guard let image = NSImage(data: imageData) else { return nil }
+    static func annotateImageWithClickMarker(_ imageData: Data, at point: CGPoint) -> Data {
+        let image = NSImage(data: imageData)!
 
         let size = image.size
         let newImage = NSImage(size: size)
@@ -162,10 +210,7 @@ class CaptureService {
         image.draw(at: .zero, from: NSRect(origin: .zero, size: size), operation: .copy, fraction: 1.0)
 
         // Set up drawing context
-        guard let context = NSGraphicsContext.current?.cgContext else {
-            newImage.unlockFocus()
-            return nil
-        }
+        let context = NSGraphicsContext.current!.cgContext
 
         // Draw red circle and cross
         context.setStrokeColor(NSColor.red.cgColor)
@@ -189,21 +234,19 @@ class CaptureService {
         newImage.unlockFocus()
 
         // Convert back to PNG data
-        guard let tiffData = newImage.tiffRepresentation,
-              let bitmapRep = NSBitmapImageRep(data: tiffData),
-              let pngData = bitmapRep.representation(using: .png, properties: [:]) else {
-            return nil
-        }
+        let tiffData = newImage.tiffRepresentation!
+        let bitmapRep = NSBitmapImageRep(data: tiffData)!
+        let pngData = bitmapRep.representation(using: .png, properties: [:])!
 
         return pngData
     }
 
     /// Save click event locally
-    private func saveClickEvent(_ event: ClickEvent, screenshotBefore: Data?, screenshotAfter: Data?) {
+    private func saveClickEvent(_ event: ClickEvent, screenshotBefore: Data, screenshotAfter: Data) {
         // Annotate only the "before" screenshot with click marker if setting is enabled
-        let annotatedBefore: Data?
+        let annotatedBefore: Data
         if AppState.shared.addClickMarker {
-            annotatedBefore = screenshotBefore.flatMap { CaptureService.annotateImageWithClickMarker($0, at: event.mousePosition) }
+            annotatedBefore = CaptureService.annotateImageWithClickMarker(screenshotBefore, at: event.mousePosition)
         } else {
             annotatedBefore = screenshotBefore
         }
@@ -224,12 +267,12 @@ class CaptureService {
         }
 
         // Create directory if it doesn't exist
-        try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
+        try! FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
 
         return appDir
     }
 
-    private func saveEventLocally(_ event: ClickEvent, screenshotBefore: Data?, screenshotAfter: Data?, to directory: URL) {
+    private func saveEventLocally(_ event: ClickEvent, screenshotBefore: Data, screenshotAfter: Data, to directory: URL) {
         // Create timestamp string for filenames
         let timestamp = ISO8601DateFormatter().string(from: event.timestamp).replacingOccurrences(of: ":", with: "-")
 
@@ -238,20 +281,17 @@ class CaptureService {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = .prettyPrinted
 
-        if let jsonData = try? encoder.encode(event) {
-            let metadataPath = directory.appendingPathComponent("\(timestamp)_metadata.json")
-            try? jsonData.write(to: metadataPath)
-        }
+        let jsonData = try! encoder.encode(event)
+        let metadataPath = directory.appendingPathComponent("\(timestamp)_metadata.json")
+        try! jsonData.write(to: metadataPath)
 
         // Save screenshots with timestamp
-        if let beforeData = screenshotBefore {
-            let beforePath = directory.appendingPathComponent("\(timestamp)_before.png")
-            try? beforeData.write(to: beforePath)
-        }
+        let beforePath = directory.appendingPathComponent("\(timestamp)_before.png")
+        try! screenshotBefore.write(to: beforePath)
 
-        if let afterData = screenshotAfter {
-            let afterPath = directory.appendingPathComponent("\(timestamp)_after.png")
-            try? afterData.write(to: afterPath)
-        }
+        let afterPath = directory.appendingPathComponent("\(timestamp)_after.png")
+        try! screenshotAfter.write(to: afterPath)
+
+        print("Saved screenshots to: \(beforePath.path) and \(afterPath.path)")
     }
 }
