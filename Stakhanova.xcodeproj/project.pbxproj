@@ -17,10 +17,11 @@
 		A1000008000000000000001 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000008000000000000001 /* SettingsView.swift */; };
 		A1000009000000000000001 /* EnvLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000010000000000000001 /* EnvLoader.swift */; };
 		A1000010000000000000002 /* AnalyticsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000011000000000000001 /* AnalyticsModels.swift */; };
+		B0903BBD2EC3A48400D0D7A1 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0903BBC2EC3A48400D0D7A1 /* AppState.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		C1000001000000000000001 /* Stakhanova.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Stakhanova.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B0903BBC2EC3A48400D0D7A1 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		B1000001000000000000001 /* StakhanovaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StakhanovaApp.swift; sourceTree = "<group>"; };
 		B1000002000000000000001 /* ClickEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClickEvent.swift; sourceTree = "<group>"; };
 		B1000003000000000000001 /* EventMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventMonitor.swift; sourceTree = "<group>"; };
@@ -32,6 +33,7 @@
 		B1000009000000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B1000010000000000000001 /* EnvLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvLoader.swift; sourceTree = "<group>"; };
 		B1000011000000000000001 /* AnalyticsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsModels.swift; sourceTree = "<group>"; };
+		C1000001000000000000001 /* Stakhanova.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Stakhanova.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -53,17 +55,10 @@
 			);
 			sourceTree = "<group>";
 		};
-		E1000003000000000000001 /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				C1000001000000000000001 /* Stakhanova.app */,
-			);
-			name = Products;
-			sourceTree = "<group>";
-		};
 		E1000002000000000000001 /* Stakhanova */ = {
 			isa = PBXGroup;
 			children = (
+				B0903BBC2EC3A48400D0D7A1 /* AppState.swift */,
 				B1000001000000000000001 /* StakhanovaApp.swift */,
 				E1000004000000000000001 /* Models */,
 				E1000005000000000000001 /* Services */,
@@ -72,6 +67,14 @@
 				B1000009000000000000001 /* Info.plist */,
 			);
 			path = Stakhanova;
+			sourceTree = "<group>";
+		};
+		E1000003000000000000001 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				C1000001000000000000001 /* Stakhanova.app */,
+			);
+			name = Products;
 			sourceTree = "<group>";
 		};
 		E1000004000000000000001 /* Models */ = {
@@ -180,6 +183,7 @@
 				A1000004000000000000001 /* AccessibilityService.swift in Sources */,
 				A1000005000000000000001 /* CaptureService.swift in Sources */,
 				A1000006000000000000001 /* StorageService.swift in Sources */,
+				B0903BBD2EC3A48400D0D7A1 /* AppState.swift in Sources */,
 				A1000007000000000000001 /* AnalyticsService.swift in Sources */,
 				A1000008000000000000001 /* SettingsView.swift in Sources */,
 				A1000009000000000000001 /* EnvLoader.swift in Sources */,
@@ -207,12 +211,12 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.stakhanova.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
 			};
 			name = Debug;
 		};
@@ -233,12 +237,12 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.stakhanova.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
 			};
 			name = Release;
 		};
