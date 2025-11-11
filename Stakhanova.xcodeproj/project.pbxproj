@@ -17,6 +17,7 @@
 		A1000008000000000000001 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000008000000000000001 /* SettingsView.swift */; };
 		A1000009000000000000001 /* EnvLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000010000000000000001 /* EnvLoader.swift */; };
 		A1000010000000000000002 /* AnalyticsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000011000000000000001 /* AnalyticsModels.swift */; };
+		A1000011000000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B1000012000000000000001 /* Assets.xcassets */; };
 		B0903BBD2EC3A48400D0D7A1 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0903BBC2EC3A48400D0D7A1 /* AppState.swift */; };
 		B0BD428E2EC3AA21006686C5 /* MonitoringStatusWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0BD428F2EC3AA21006686C5 /* MonitoringStatusWindow.swift */; };
 /* End PBXBuildFile section */
@@ -35,6 +36,7 @@
 		B1000009000000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B1000010000000000000001 /* EnvLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvLoader.swift; sourceTree = "<group>"; };
 		B1000011000000000000001 /* AnalyticsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsModels.swift; sourceTree = "<group>"; };
+		B1000012000000000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C1000001000000000000001 /* Stakhanova.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Stakhanova.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -66,6 +68,7 @@
 				E1000005000000000000001 /* Services */,
 				E1000006000000000000001 /* Views */,
 				E1000007000000000000001 /* Utils */,
+				B1000012000000000000001 /* Assets.xcassets */,
 				B1000009000000000000001 /* Info.plist */,
 			);
 			path = Stakhanova;
@@ -170,6 +173,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1000011000000000000001 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -356,7 +356,7 @@ struct SettingsView: View {
                         // Show masked API key or warning
                         if let key = actualApiKey, !key.isEmpty {
                             let visibleChars = min(4, key.count)
-                            let masked = String(key.prefix(visibleChars)) + String(repeating: "*", count: max(8, key.count - visibleChars))
+                            let masked = String(key.prefix(visibleChars)) + String(repeating: "*", count: 10)
                             Text(masked)
                                 .font(.caption)
                                 .foregroundColor(.green)
@@ -684,9 +684,9 @@ struct SettingsView: View {
             }()
 
             if let envToken = envKey, !envToken.isEmpty {
-                // Show masked .env token (first 4 chars + asterisks)
+                // Show masked .env token (first 4 chars + 10 asterisks)
                 let visibleChars = min(4, envToken.count)
-                let masked = String(envToken.prefix(visibleChars)) + String(repeating: "*", count: max(0, envToken.count - visibleChars))
+                let masked = String(envToken.prefix(visibleChars)) + String(repeating: "*", count: 10)
                 apiKey = masked
             } else {
                 apiKey = ""

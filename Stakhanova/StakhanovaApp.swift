@@ -39,8 +39,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Configure status item to show icon only (no text)
         if let button = statusItem?.button {
-            if let img = NSImage(systemSymbolName: "camera.circle", accessibilityDescription: "Stakhanova") {
-                img.isTemplate = true // follows system tint
+            // Use custom menu bar icon
+            if let img = NSImage(named: "menubar_icon") {
+                img.isTemplate = true // follows system tint (black/white based on theme)
                 button.image = img
                 button.imagePosition = .imageOnly
             }
@@ -62,6 +63,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                            action: #selector(toggleMonitoring),
                            keyEquivalent: "")
         t.target = self
+        t.image = NSImage(systemSymbolName: "play.circle", accessibilityDescription: nil)
         m.addItem(t)
         self.toggleMenuItem = t
 
@@ -72,6 +74,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                   action: #selector(openSettings),
                                   keyEquivalent: "o")
         openMain.target = self
+        openMain.image = NSImage(systemSymbolName: "gear", accessibilityDescription: nil)
         m.addItem(openMain)
 
         // Open Captures Folder
@@ -79,6 +82,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                    action: #selector(openCapturesFolder),
                                    keyEquivalent: "f")
         openFolder.target = self
+        openFolder.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
         m.addItem(openFolder)
 
         m.addItem(NSMenuItem.separator())
@@ -88,16 +92,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                               action: #selector(NSApplication.terminate(_:)),
                               keyEquivalent: "q")
         quit.target = NSApp
+        quit.image = NSImage(systemSymbolName: "power", accessibilityDescription: nil)
         m.addItem(quit)
 
         return m
     }()
 
     func setupMonitoringStateObserver() {
-        // Observe AppState.shared.isMonitoring to update menu title
+        // Observe AppState.shared.isMonitoring to update menu title and icon
         monitoringStateSub = AppState.shared.$isMonitoring.sink { [weak self] isMonitoring in
             guard let self = self else { return }
             self.toggleMenuItem?.title = isMonitoring ? "Stop Monitoring" : "Start Monitoring"
+            self.toggleMenuItem?.image = NSImage(
+                systemSymbolName: isMonitoring ? "stop.circle" : "play.circle",
+                accessibilityDescription: nil
+            )
 
             // Monitoring window disabled - causes layout recursion
             // TODO: Fix and re-enable
