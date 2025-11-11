@@ -7,7 +7,7 @@ class AnalyticsService: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     // Helper function to compress image to 1080p max
-    private func compressImage(_ imageData: Data) -> Data? {
+    private func compressImage(_ imageData: Data, clickPosition: CGPoint? = nil) -> Data? {
         guard let image = NSImage(data: imageData) else { return nil }
 
         let maxDimension: CGFloat = 1920 // 1080p width
@@ -15,12 +15,15 @@ class AnalyticsService: ObservableObject {
 
         // Calculate new size maintaining aspect ratio
         var newSize = currentSize
+        var scaleFactor: CGFloat = 1.0
         if currentSize.width > maxDimension || currentSize.height > maxDimension {
             let ratio = currentSize.width / currentSize.height
             if currentSize.width > currentSize.height {
                 newSize = CGSize(width: maxDimension, height: maxDimension / ratio)
+                scaleFactor = maxDimension / currentSize.width
             } else {
                 newSize = CGSize(width: maxDimension * ratio, height: maxDimension)
+                scaleFactor = maxDimension / currentSize.height
             }
         }
 
@@ -28,6 +31,37 @@ class AnalyticsService: ObservableObject {
         let newImage = NSImage(size: newSize)
         newImage.lockFocus()
         image.draw(in: NSRect(origin: .zero, size: newSize))
+
+        // Draw click marker if position is provided
+        if let clickPosition = clickPosition {
+            guard let context = NSGraphicsContext.current?.cgContext else {
+                newImage.unlockFocus()
+                return nil
+            }
+
+            // Scale click position to match new image size
+            let scaledPoint = CGPoint(x: clickPosition.x * scaleFactor, y: clickPosition.y * scaleFactor)
+
+            // Draw red circle and cross
+            context.setStrokeColor(NSColor.red.cgColor)
+            context.setLineWidth(3.0)
+
+            let radius: CGFloat = 20.0
+
+            // Draw circle
+            let circleRect = CGRect(x: scaledPoint.x - radius, y: scaledPoint.y - radius, width: radius * 2, height: radius * 2)
+            context.strokeEllipse(in: circleRect)
+
+            // Draw cross (X shape)
+            context.move(to: CGPoint(x: scaledPoint.x - radius, y: scaledPoint.y - radius))
+            context.addLine(to: CGPoint(x: scaledPoint.x + radius, y: scaledPoint.y + radius))
+            context.strokePath()
+
+            context.move(to: CGPoint(x: scaledPoint.x + radius, y: scaledPoint.y - radius))
+            context.addLine(to: CGPoint(x: scaledPoint.x - radius, y: scaledPoint.y + radius))
+            context.strokePath()
+        }
+
         newImage.unlockFocus()
 
         // Convert to JPEG data with 70% quality for better compression
@@ -424,9 +458,11 @@ extension AnalyticsService {
 
         // Add screenshots as base64 images (compressed to 1080p)
         for (index, data) in batchData.enumerated() {
-            // Always send before screenshot (compressed)
+            let clickPosition = data.metadata.mousePosition
+
+            // Always send before screenshot (compressed with click marker)
             if let beforeData = data.before,
-               let compressedData = compressImage(beforeData) {
+               let compressedData = compressImage(beforeData, clickPosition: clickPosition) {
                 let base64 = compressedData.base64EncodedString()
                 let originalSize = Double(beforeData.count) / 1024 / 1024
                 let compressedSize = Double(compressedData.count) / 1024 / 1024
@@ -437,9 +473,9 @@ extension AnalyticsService {
                 logCallback("Added before screenshot for event \(index + 1) (\(String(format: "%.2f", originalSize))MB → \(String(format: "%.2f", compressedSize))MB)")
             }
 
-            // Only send after screenshot if requested
+            // Only send after screenshot if requested (without click marker)
             if sendAllScreenshots, let afterData = data.after,
-               let compressedData = compressImage(afterData) {
+               let compressedData = compressImage(afterData, clickPosition: nil) {
                 let base64 = compressedData.base64EncodedString()
                 let originalSize = Double(afterData.count) / 1024 / 1024
                 let compressedSize = Double(compressedData.count) / 1024 / 1024
@@ -557,9 +593,11 @@ extension AnalyticsService {
 
         // Add screenshots as base64 images (compressed to 1080p)
         for (index, data) in batchData.enumerated() {
-            // Always send before screenshot (compressed)
+            let clickPosition = data.metadata.mousePosition
+
+            // Always send before screenshot (compressed with click marker)
             if let beforeData = data.before,
-               let compressedData = compressImage(beforeData) {
+               let compressedData = compressImage(beforeData, clickPosition: clickPosition) {
                 let base64 = compressedData.base64EncodedString()
                 let originalSize = Double(beforeData.count) / 1024 / 1024
                 let compressedSize = Double(compressedData.count) / 1024 / 1024
@@ -572,9 +610,9 @@ extension AnalyticsService {
                 logCallback("Added before screenshot for event \(index + 1) (\(String(format: "%.2f", originalSize))MB → \(String(format: "%.2f", compressedSize))MB)")
             }
 
-            // Only send after screenshot if requested
+            // Only send after screenshot if requested (without click marker)
             if sendAllScreenshots, let afterData = data.after,
-               let compressedData = compressImage(afterData) {
+               let compressedData = compressImage(afterData, clickPosition: nil) {
                 let base64 = compressedData.base64EncodedString()
                 let originalSize = Double(afterData.count) / 1024 / 1024
                 let compressedSize = Double(compressedData.count) / 1024 / 1024

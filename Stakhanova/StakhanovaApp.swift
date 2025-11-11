@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 @main
 struct StakhanovaApp: App {
@@ -20,102 +21,87 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var eventMonitor: EventMonitor?
     var captureService: CaptureService?
 
-    var startMenuItem: NSMenuItem?
-    var stopMenuItem: NSMenuItem?
+    var toggleMenuItem: NSMenuItem?
     var settingsWindow: NSWindow?
+    private var monitoringStateSub: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Create menu bar item
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-
-        if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "camera.circle", accessibilityDescription: "Stakhanova")
-        }
-
-        setupMenu()
-
         // Initialize services
         captureService = CaptureService()
         eventMonitor = EventMonitor(captureService: captureService!)
+
+        // Create menu bar item
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+
+        // Build menu
+        statusItem?.menu = menu
+
+        // Configure status item to show icon only (no text)
+        if let button = statusItem?.button {
+            if let img = NSImage(systemSymbolName: "camera.circle", accessibilityDescription: "Stakhanova") {
+                img.isTemplate = true // follows system tint
+                button.image = img
+                button.imagePosition = .imageOnly
+            }
+        }
+        statusItem?.length = NSStatusItem.squareLength
+
+        // Keep menu label in sync with AppState
+        setupMonitoringStateObserver()
 
         // Request permissions on first launch
         requestPermissions()
     }
 
-    func setupMenu() {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
+    private lazy var menu: NSMenu = {
+        let m = NSMenu()
 
-        startMenuItem = NSMenuItem(title: "Start Monitoring", action: #selector(startMonitoring), keyEquivalent: "s")
-        startMenuItem?.target = self
+        // Start / Stop Monitoring
+        let t = NSMenuItem(title: "Start Monitoring",
+                           action: #selector(toggleMonitoring),
+                           keyEquivalent: "")
+        t.target = self
+        m.addItem(t)
+        self.toggleMenuItem = t
 
-        stopMenuItem = NSMenuItem(title: "Stop Monitoring", action: #selector(stopMonitoring), keyEquivalent: "t")
-        stopMenuItem?.target = self
+        m.addItem(NSMenuItem.separator())
 
-        menu.addItem(startMenuItem!)
-        menu.addItem(stopMenuItem!)
-        menu.addItem(NSMenuItem.separator())
+        // Open Stakhanova (show main UI)
+        let openMain = NSMenuItem(title: "Open Stakhanova…",
+                                  action: #selector(openSettings),
+                                  keyEquivalent: "o")
+        openMain.target = self
+        m.addItem(openMain)
 
-        let openFolderItem = NSMenuItem(title: "Open Captures Folder", action: #selector(openCapturesFolder), keyEquivalent: "f")
-        openFolderItem.target = self
-        menu.addItem(openFolderItem)
+        // Open Captures Folder
+        let openFolder = NSMenuItem(title: "Open Captures Folder…",
+                                   action: #selector(openCapturesFolder),
+                                   keyEquivalent: "f")
+        openFolder.target = self
+        m.addItem(openFolder)
 
-        menu.addItem(NSMenuItem.separator())
+        m.addItem(NSMenuItem.separator())
 
-        let settingsItem = NSMenuItem(title: "Open Stakhanova...", action: #selector(openSettings), keyEquivalent: "o")
-        settingsItem.target = self
-        menu.addItem(settingsItem)
+        // Quit
+        let quit = NSMenuItem(title: "Quit Stakhanova",
+                              action: #selector(NSApplication.terminate(_:)),
+                              keyEquivalent: "q")
+        quit.target = NSApp
+        m.addItem(quit)
 
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        return m
+    }()
 
-        statusItem?.menu = menu
-        menu.delegate = self
-        updateMenuItems()
-    }
-
-    @objc func startMonitoring() {
-        captureService?.startSession()
-        eventMonitor?.start()
-        updateMenuItems()
-        print("Started monitoring clicks")
-    }
-
-    @objc func stopMonitoring() {
-        eventMonitor?.stop()
-        captureService?.endSession()
-        updateMenuItems()
-        print("Stopped monitoring clicks")
-
-        // Notify that a new session was created
-        NotificationCenter.default.post(name: NSNotification.Name("SessionEnded"), object: nil)
-    }
-
-    func updateMenuItems() {
-        let isRunning = eventMonitor?.isRunning ?? false
-        startMenuItem?.isEnabled = !isRunning
-        stopMenuItem?.isEnabled = isRunning
-    }
-
-    func menuWillOpen(_ menu: NSMenu) {
-        updateMenuItems()
-    }
-
-    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        let isRunning = eventMonitor?.isRunning ?? false
-        print("validateMenuItem called - isRunning: \(isRunning)")
-
-        if menuItem == startMenuItem {
-            print("Validating Start - should be enabled: \(!isRunning)")
-            return !isRunning
+    func setupMonitoringStateObserver() {
+        // Observe AppState.shared.isMonitoring to update menu title
+        monitoringStateSub = AppState.shared.$isMonitoring.sink { [weak self] isMonitoring in
+            guard let self = self else { return }
+            self.toggleMenuItem?.title = isMonitoring ? "Stop Monitoring" : "Start Monitoring"
         }
+    }
 
-        if menuItem == stopMenuItem {
-            print("Validating Stop - should be enabled: \(isRunning)")
-            return isRunning
-        }
-
-        return true
+    @objc func toggleMonitoring() {
+        AppState.shared.isMonitoring.toggle()
     }
 
     @objc func openCapturesFolder() {

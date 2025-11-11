@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var selectedModel: LLMModel?
     @State private var sendAllScreenshots: Bool = false
     @State private var reasoningEffort: String = "minimal"
+    @State private var addClickMarker: Bool = true
 
     // Analytics state
     @State private var sessions: [SessionInfo] = []
@@ -579,6 +580,12 @@ struct SettingsView: View {
                     Toggle("Send all screenshots (before & after)", isOn: $sendAllScreenshots)
                         .help("By default, only before-click screenshots are sent to save bandwidth. Enable to send both before and after screenshots.")
 
+                    Toggle("Add click marker on screenshots", isOn: $addClickMarker)
+                        .onChange(of: addClickMarker) { oldValue, newValue in
+                            AppState.shared.addClickMarker = newValue
+                        }
+                        .help("Add a red cross marker at the click position on pre-click screenshots.")
+
                     Text("Settings are saved automatically")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -694,6 +701,9 @@ struct SettingsView: View {
 
         // Load reasoning effort
         reasoningEffort = analyticsService.reasoningEffort
+
+        // Load click marker setting
+        addClickMarker = AppState.shared.addClickMarker
     }
 
     private func loadSessions() {
