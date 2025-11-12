@@ -452,6 +452,17 @@ struct SettingsView: View {
                                 .foregroundStyle(.blue)
                             }
                             .chartXAxisLabel("Time in minutes")
+                            .chartXAxis {
+                                AxisMarks(values: .automatic) { value in
+                                    AxisValueLabel {
+                                        if let minutes = value.as(Double.self) {
+                                            Text(String(format: "%.1f", minutes))
+                                        }
+                                    }
+                                    AxisGridLine()
+                                    AxisTick()
+                                }
+                            }
                             .frame(height: CGFloat(result.appUsage.count * 40 + 50))
                             .padding()
 
