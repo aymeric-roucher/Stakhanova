@@ -440,6 +440,98 @@ extension AnalyticsService {
         }
     }
 
+    // MARK: - Image Processing Helpers
+
+    /// Add a screenshot to content array with compression and logging
+    private func addScreenshotToContent(
+        _ contentArray: inout [[String: Any]],
+        imageData: Data,
+        clickPosition: CGPoint?,
+        eventIndex: Int,
+        screenshotType: String,
+        imageFormat: String,
+        logCallback: @escaping (String) -> Void
+    ) {
+        guard let compressedData = compressImage(imageData, clickPosition: clickPosition) else {
+            return
+        }
+
+        let base64 = compressedData.base64EncodedString()
+        let originalSize = Double(imageData.count) / 1024 / 1024
+        let compressedSize = Double(compressedData.count) / 1024 / 1024
+
+        // Add image in the appropriate format
+        if imageFormat == "openai_responses" {
+            contentArray.append([
+                "type": "input_image",
+                "image_url": "data:image/jpeg;base64,\(base64)"
+            ])
+        } else {
+            // Standard OpenAI/HuggingFace format
+            contentArray.append([
+                "type": "image_url",
+                "image_url": [
+                    "url": "data:image/jpeg;base64,\(base64)"
+                ]
+            ])
+        }
+
+        logCallback("Added \(screenshotType) screenshot for event \(eventIndex + 1) (\(String(format: "%.2f", originalSize))MB → \(String(format: "%.2f", compressedSize))MB)")
+    }
+
+    /// Build content array with prompt and screenshots
+    private func buildContentArray(
+        prompt: String,
+        batchData: [(before: Data?, after: Data?, metadata: ClickEvent)],
+        sendAllScreenshots: Bool,
+        imageFormat: String,
+        logCallback: @escaping (String) -> Void
+    ) -> [[String: Any]] {
+        var contentArray: [[String: Any]]
+
+        // Add prompt in the appropriate format
+        if imageFormat == "openai_responses" {
+            contentArray = [["type": "input_text", "text": prompt]]
+        } else {
+            contentArray = [["type": "text", "text": prompt]]
+        }
+
+        // Add screenshots
+        for (index, data) in batchData.enumerated() {
+            let clickPosition = data.metadata.mousePosition
+
+            // Always send before screenshot (compressed with click marker)
+            if let beforeData = data.before {
+                addScreenshotToContent(
+                    &contentArray,
+                    imageData: beforeData,
+                    clickPosition: clickPosition,
+                    eventIndex: index,
+                    screenshotType: "before",
+                    imageFormat: imageFormat,
+                    logCallback: logCallback
+                )
+            }
+
+            // Only send after screenshot if requested (without click marker)
+            if sendAllScreenshots, let afterData = data.after {
+                addScreenshotToContent(
+                    &contentArray,
+                    imageData: afterData,
+                    clickPosition: nil,
+                    eventIndex: index,
+                    screenshotType: "after",
+                    imageFormat: imageFormat,
+                    logCallback: logCallback
+                )
+            }
+        }
+
+        return contentArray
+    }
+
+    // MARK: - API Query Methods
+
     private func queryOpenAI(prompt: String, batchData: [(before: Data?, after: Data?, metadata: ClickEvent)], sendAllScreenshots: Bool, model: String, apiKey: String, logCallback: @escaping (String) -> Void) async throws -> AppUsageAnalysis {
         let url = URL(string: "https://api.openai.com/v1/responses")!
         logCallback("Request URL: \(url)")
@@ -451,41 +543,14 @@ extension AnalyticsService {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        // Build content array with text and images
-        var contentArray: [[String: Any]] = [
-            ["type": "input_text", "text": prompt]
-        ]
-
-        // Add screenshots as base64 images (compressed to 1080p)
-        for (index, data) in batchData.enumerated() {
-            let clickPosition = data.metadata.mousePosition
-
-            // Always send before screenshot (compressed with click marker)
-            if let beforeData = data.before,
-               let compressedData = compressImage(beforeData, clickPosition: clickPosition) {
-                let base64 = compressedData.base64EncodedString()
-                let originalSize = Double(beforeData.count) / 1024 / 1024
-                let compressedSize = Double(compressedData.count) / 1024 / 1024
-                contentArray.append([
-                    "type": "input_image",
-                    "image_url": "data:image/jpeg;base64,\(base64)"
-                ])
-                logCallback("Added before screenshot for event \(index + 1) (\(String(format: "%.2f", originalSize))MB → \(String(format: "%.2f", compressedSize))MB)")
-            }
-
-            // Only send after screenshot if requested (without click marker)
-            if sendAllScreenshots, let afterData = data.after,
-               let compressedData = compressImage(afterData, clickPosition: nil) {
-                let base64 = compressedData.base64EncodedString()
-                let originalSize = Double(afterData.count) / 1024 / 1024
-                let compressedSize = Double(compressedData.count) / 1024 / 1024
-                contentArray.append([
-                    "type": "input_image",
-                    "image_url": "data:image/jpeg;base64,\(base64)"
-                ])
-                logCallback("Added after screenshot for event \(index + 1) (\(String(format: "%.2f", originalSize))MB → \(String(format: "%.2f", compressedSize))MB)")
-            }
-        }
+        // Build content array using helper
+        let contentArray = buildContentArray(
+            prompt: prompt,
+            batchData: batchData,
+            sendAllScreenshots: sendAllScreenshots,
+            imageFormat: "openai_responses",
+            logCallback: logCallback
+        )
 
         // Wrap content in a message input item
         let inputArray: [[String: Any]] = [
@@ -586,45 +651,14 @@ extension AnalyticsService {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        // Build message content with text and images
-        var contentArray: [[String: Any]] = [
-            ["type": "text", "text": prompt]
-        ]
-
-        // Add screenshots as base64 images (compressed to 1080p)
-        for (index, data) in batchData.enumerated() {
-            let clickPosition = data.metadata.mousePosition
-
-            // Always send before screenshot (compressed with click marker)
-            if let beforeData = data.before,
-               let compressedData = compressImage(beforeData, clickPosition: clickPosition) {
-                let base64 = compressedData.base64EncodedString()
-                let originalSize = Double(beforeData.count) / 1024 / 1024
-                let compressedSize = Double(compressedData.count) / 1024 / 1024
-                contentArray.append([
-                    "type": "image_url",
-                    "image_url": [
-                        "url": "data:image/jpeg;base64,\(base64)"
-                    ]
-                ])
-                logCallback("Added before screenshot for event \(index + 1) (\(String(format: "%.2f", originalSize))MB → \(String(format: "%.2f", compressedSize))MB)")
-            }
-
-            // Only send after screenshot if requested (without click marker)
-            if sendAllScreenshots, let afterData = data.after,
-               let compressedData = compressImage(afterData, clickPosition: nil) {
-                let base64 = compressedData.base64EncodedString()
-                let originalSize = Double(afterData.count) / 1024 / 1024
-                let compressedSize = Double(compressedData.count) / 1024 / 1024
-                contentArray.append([
-                    "type": "image_url",
-                    "image_url": [
-                        "url": "data:image/jpeg;base64,\(base64)"
-                    ]
-                ])
-                logCallback("Added after screenshot for event \(index + 1) (\(String(format: "%.2f", originalSize))MB → \(String(format: "%.2f", compressedSize))MB)")
-            }
-        }
+        // Build content array using helper
+        let contentArray = buildContentArray(
+            prompt: prompt,
+            batchData: batchData,
+            sendAllScreenshots: sendAllScreenshots,
+            imageFormat: "openai_chat",
+            logCallback: logCallback
+        )
 
         let body: [String: Any] = [
             "model": model,

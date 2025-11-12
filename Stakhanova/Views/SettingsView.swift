@@ -451,6 +451,7 @@ struct SettingsView: View {
                                 )
                                 .foregroundStyle(.blue)
                             }
+                            .chartXAxisLabel("Time in minutes")
                             .frame(height: CGFloat(result.appUsage.count * 40 + 50))
                             .padding()
 
