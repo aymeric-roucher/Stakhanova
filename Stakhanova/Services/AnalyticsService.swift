@@ -100,6 +100,27 @@ class AnalyticsService: ObservableObject {
     private let modelKey = "LLMModel"
     private let reasoningEffortKey = "OpenAIReasoningEffort"
 
+    // JSON Schema for structured output
+    private static let appUsageSchema: [String: Any] = [
+        "type": "object",
+        "properties": [
+            "apps": [
+                "type": "array",
+                "items": [
+                    "type": "object",
+                    "properties": [
+                        "appName": ["type": "string"],
+                        "secondsUsed": ["type": "number"]
+                    ],
+                    "required": ["appName", "secondsUsed"],
+                    "additionalProperties": false
+                ]
+            ]
+        ],
+        "required": ["apps"],
+        "additionalProperties": false
+    ]
+
     @Published var apiKey: String? {
         didSet {
             userDefaults.set(apiKey, forKey: apiKeyKey)
@@ -137,6 +158,12 @@ class AnalyticsService: ObservableObject {
 
         // Load API key from UserDefaults (user-set key overrides .env)
         self.apiKey = userDefaults.string(forKey: apiKeyKey)
+        // One-time migration: clean up any previously persisted masked values
+        if let key = self.apiKey, key.contains("*") {
+            print("AnalyticsService: Detected previously masked API key in UserDefaults; clearing it to fallback to .env")
+            userDefaults.removeObject(forKey: apiKeyKey)
+            self.apiKey = nil
+        }
 
         // Load or set default model
         if let savedModel = userDefaults.string(forKey: modelKey) {
@@ -360,7 +387,13 @@ extension AnalyticsService {
         logCallback("Making API request to \(apiProvider.rawValue)...")
 
         // Call LLM with structured output (including screenshots)
-        let result = try await queryLLMWithStructuredOutput(prompt: prompt, batchData: batchData, sendAllScreenshots: sendAllScreenshots, model: model, apiKey: apiKey, logCallback: logCallback)
+        let result: AppUsageAnalysis
+        switch apiProvider {
+        case .openai:
+            result = try await queryOpenAI(prompt: prompt, batchData: batchData, sendAllScreenshots: sendAllScreenshots, model: model, apiKey: apiKey, logCallback: logCallback)
+        case .huggingface:
+            result = try await queryHuggingFace(prompt: prompt, batchData: batchData, sendAllScreenshots: sendAllScreenshots, model: model, apiKey: apiKey, logCallback: logCallback)
+        }
 
         logCallback("API response received successfully")
 
@@ -449,15 +482,6 @@ extension AnalyticsService {
         """
 
         return prompt
-    }
-
-    private func queryLLMWithStructuredOutput(prompt: String, batchData: [(before: Data?, after: Data?, metadata: ClickEvent)], sendAllScreenshots: Bool, model: String, apiKey: String, logCallback: @escaping (String) -> Void) async throws -> AppUsageAnalysis {
-        switch apiProvider {
-        case .openai:
-            return try await queryOpenAI(prompt: prompt, batchData: batchData, sendAllScreenshots: sendAllScreenshots, model: model, apiKey: apiKey, logCallback: logCallback)
-        case .huggingface:
-            return try await queryHuggingFace(prompt: prompt, batchData: batchData, sendAllScreenshots: sendAllScreenshots, model: model, apiKey: apiKey, logCallback: logCallback)
-        }
     }
 
     // MARK: - Image Processing Helpers
@@ -581,26 +605,6 @@ extension AnalyticsService {
             ]
         ]
 
-        let schema: [String: Any] = [
-            "type": "object",
-            "properties": [
-                "apps": [
-                    "type": "array",
-                    "items": [
-                        "type": "object",
-                        "properties": [
-                            "appName": ["type": "string"],
-                            "secondsUsed": ["type": "number"]
-                        ],
-                        "required": ["appName", "secondsUsed"],
-                        "additionalProperties": false
-                    ]
-                ]
-            ],
-            "required": ["apps"],
-            "additionalProperties": false
-        ]
-
         let body: [String: Any] = [
             "model": model,
             "input": inputArray,
@@ -613,7 +617,7 @@ extension AnalyticsService {
                     "type": "json_schema",
                     "name": "app_usage_analysis",
                     "strict": true,
-                    "schema": schema
+                    "schema": AnalyticsService.appUsageSchema
                 ]
             ]
         ]

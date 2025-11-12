@@ -10,8 +10,7 @@ struct SettingsView: View {
     @State private var sendAllScreenshots: Bool = false
     @State private var reasoningEffort: String = "minimal"
     @State private var addClickMarker: Bool = true
-    @State private var apiKeyVisible: Bool = false
-    @State private var suppressApiKeySave: Bool = false
+    
 
     // Analytics state
     @State private var sessions: [SessionInfo] = []
@@ -625,57 +624,12 @@ struct SettingsView: View {
                         loadSettings()
                     }
 
-                    HStack(spacing: 8) {
-                        Group {
-                            if apiKeyVisible {
-                                TextField("API Key", text: $apiKey)
-                            } else {
-                                SecureField("API Key", text: $apiKey)
-                            }
-                        }
+                    TextField("API Key", text: $apiKey)
                         .textFieldStyle(.roundedBorder)
-
-                        Button(action: {
-                            apiKeyVisible.toggle()
-                            // Update field contents to match visibility without saving
-                            suppressApiKeySave = true
-                            let actualApiKey: String? = {
-                                if let userKey = analyticsService.apiKey, !userKey.isEmpty { return userKey }
-                                switch selectedProvider {
-                                case .openai: return EnvLoader.shared.get("OPENAI_API_KEY")
-                                case .huggingface: return EnvLoader.shared.get("HF_TOKEN")
-                                }
-                            }()
-                            if apiKeyVisible {
-                                // Reveal the full key
-                                apiKey = actualApiKey ?? ""
-                            } else {
-                                // Restore masked view if we have a key
-                                if let key = actualApiKey, !key.isEmpty {
-                                    let visibleChars = min(4, key.count)
-                                    apiKey = String(key.prefix(visibleChars)) + String(repeating: "*", count: 10)
-                                } else {
-                                    apiKey = ""
-                                }
-                            }
-                        }) {
-                            Image(systemName: apiKeyVisible ? "eye.slash" : "eye")
-                                .foregroundColor(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .help(apiKeyVisible ? "Hide API Key" : "Show API Key")
-                    }
-                    .onChange(of: apiKey) { oldValue, newValue in
-                        if suppressApiKeySave {
-                            suppressApiKeySave = false
-                            return
-                        }
-                        // Don't save if it's just the masked .env token (contains asterisks)
-                        if !newValue.contains("*") {
-                            // Auto-save when user types a custom API key
+                        .onChange(of: apiKey) { _, newValue in
+                            // Always save clear text entered by the user; empty clears custom key
                             analyticsService.apiKey = newValue.isEmpty ? nil : newValue
                         }
-                    }
 
                     // Show .env status (derive from saved state, not field text)
                     let envKey: String? = {
@@ -819,11 +773,16 @@ struct SettingsView: View {
     private func loadSettings() {
         selectedProvider = analyticsService.apiProvider
 
-        // Load API key from service (user-set key) or show masked .env token
+        // If a masked key was previously persisted, clear it (UI-side cleanup)
+        if let saved = analyticsService.apiKey, saved.contains("*") {
+            analyticsService.apiKey = nil
+        }
+
+        // Load API key from service (user-set key) or display the .env key directly
         if let userKey = analyticsService.apiKey, !userKey.isEmpty {
             apiKey = userKey
         } else {
-            // Check .env based on provider
+            // Check .env based on provider and show as-is
             let envKey: String? = {
                 switch selectedProvider {
                 case .openai:
@@ -832,15 +791,7 @@ struct SettingsView: View {
                     return EnvLoader.shared.get("HF_TOKEN")
                 }
             }()
-
-            if let envToken = envKey, !envToken.isEmpty {
-                // Show masked .env token (first 4 chars + 10 asterisks)
-                let visibleChars = min(4, envToken.count)
-                let masked = String(envToken.prefix(visibleChars)) + String(repeating: "*", count: 10)
-                apiKey = masked
-            } else {
-                apiKey = ""
-            }
+            apiKey = envKey ?? ""
         }
 
         // Load the selected model from service, or default to first available

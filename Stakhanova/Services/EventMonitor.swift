@@ -35,8 +35,8 @@ class EventMonitor {
         // Start session
         captureService.startSession()
 
-        // Monitor for left mouse clicks globally
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+        // Monitor for left mouse clicks globally (avoid rightClick to prevent menu interference)
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
             self?.handleClick(event)
         }
 

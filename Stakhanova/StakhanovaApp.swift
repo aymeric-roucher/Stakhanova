@@ -13,7 +13,7 @@ struct StakhanovaApp: App {
     }
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     var eventMonitor: EventMonitor?
     var captureService: CaptureService?
@@ -22,6 +22,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var settingsWindow: NSWindow?
     var monitoringStatusWindow: NSWindow?
     private var monitoringStateSub: AnyCancellable?
+    // Popover removed; using NSMenu for status bar menu
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Initialize services
