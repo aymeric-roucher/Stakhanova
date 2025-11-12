@@ -8,7 +8,7 @@ class CaptureService: NSObject, SCStreamDelegate, SCStreamOutput {
 
     private var sessionFolder: String?
     private var stream: SCStream?
-    private var frameBuffer: [CMSampleBuffer] = [] // Keep last 3 frames
+    private var frameBuffer: [CVPixelBuffer] = [] // Keep last 3 frames as pixel buffers
     private let maxBufferSize = 3
     private let streamQueue = DispatchQueue(label: "com.stakhanova.streamQueue")
     private let bufferQueue = DispatchQueue(label: "com.stakhanova.bufferQueue")
@@ -88,6 +88,7 @@ class CaptureService: NSObject, SCStreamDelegate, SCStreamOutput {
             try await stream?.stopCapture()
             stream = nil
             bufferQueue.sync {
+                // Swift automatically manages CVPixelBuffer lifetime
                 frameBuffer.removeAll()
             }
             print("ScreenCaptureKit stream stopped")
@@ -99,9 +100,15 @@ class CaptureService: NSObject, SCStreamDelegate, SCStreamOutput {
     // MARK: - SCStreamOutput
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        // Keep a buffer of the last 3 frames
+        // Extract pixel buffer from sample buffer and keep it in buffer
+        // Swift automatically manages CVPixelBuffer lifetime, no manual retain/release needed
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            print("ERROR: Failed to get pixel buffer from sample buffer in stream callback")
+            return
+        }
+
         bufferQueue.sync {
-            frameBuffer.append(sampleBuffer)
+            frameBuffer.append(pixelBuffer)
             if frameBuffer.count > maxBufferSize {
                 frameBuffer.removeFirst()
             }
@@ -165,34 +172,41 @@ class CaptureService: NSObject, SCStreamDelegate, SCStreamOutput {
 
     /// Capture frame from buffer with offset (0 = latest, 1 = previous, 2 = n-2)
     private func captureFrameFromBuffer(offset: Int) -> Data {
-        // Process the sample buffer entirely within the sync block to avoid invalidation
+        // Process the pixel buffer within the sync block
         return bufferQueue.sync {
+            print("DEBUG: captureFrameFromBuffer called with offset=\(offset), buffer count=\(frameBuffer.count)")
+
             assert(!frameBuffer.isEmpty, "Frame buffer is empty - ScreenCaptureKit stream may not have started yet or failed to start. Check screen recording permissions.")
 
             let index = max(0, frameBuffer.count - 1 - offset)
-            let sampleBuffer = frameBuffer.indices.contains(index) ? frameBuffer[index] : frameBuffer.last!
+            print("DEBUG: Accessing frame at index=\(index) (requested offset=\(offset))")
 
-            guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
-                fatalError("Failed to get image buffer from sample buffer")
-            }
+            let pixelBuffer = frameBuffer.indices.contains(index) ? frameBuffer[index] : frameBuffer.last!
 
             // Lock the pixel buffer
-            CVPixelBufferLockBaseAddress(imageBuffer, .readOnly)
-            defer { CVPixelBufferUnlockBaseAddress(imageBuffer, .readOnly) }
+            let lockResult = CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+            if lockResult != kCVReturnSuccess {
+                print("ERROR: Failed to lock pixel buffer, error code: \(lockResult)")
+                fatalError("Failed to lock pixel buffer")
+            }
+            defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
 
             // Create CGImage from pixel buffer
-            let ciImage = CIImage(cvPixelBuffer: imageBuffer)
+            let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
             let context = CIContext()
             guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else {
+                print("ERROR: Failed to create CGImage from pixel buffer")
                 fatalError("Failed to create CGImage from pixel buffer")
             }
 
             // Convert to PNG
             let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
             guard let pngData = bitmapRep.representation(using: .png, properties: [:]) else {
+                print("ERROR: Failed to convert image to PNG")
                 fatalError("Failed to convert image to PNG")
             }
 
+            print("DEBUG: Successfully captured frame, PNG size: \(pngData.count) bytes")
             return pngData
         }
     }
