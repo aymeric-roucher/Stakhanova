@@ -6,43 +6,59 @@ class AnalyticsService: ObservableObject {
     static let shared = AnalyticsService()
     private var cancellables = Set<AnyCancellable>()
 
-    // Helper function to compress image to 1080p max
+    // Helper function to compress image to 1080p max (optimized for speed)
     private func compressImage(_ imageData: Data, clickPosition: CGPoint? = nil) -> Data? {
-        guard let image = NSImage(data: imageData) else { return nil }
+        // Fast path: Get CGImage directly from PNG data
+        guard let dataProvider = CGDataProvider(data: imageData as CFData),
+              let cgImage = CGImage(pngDataProviderSource: dataProvider, decode: nil, shouldInterpolate: true, intent: .defaultIntent) else {
+            return nil
+        }
 
         let maxDimension: CGFloat = 1920 // 1080p width
-        let currentSize = image.size
+        let currentWidth = CGFloat(cgImage.width)
+        let currentHeight = CGFloat(cgImage.height)
 
         // Calculate new size maintaining aspect ratio
-        var newSize = currentSize
+        var newSize = CGSize(width: currentWidth, height: currentHeight)
         var scaleFactor: CGFloat = 1.0
-        if currentSize.width > maxDimension || currentSize.height > maxDimension {
-            let ratio = currentSize.width / currentSize.height
-            if currentSize.width > currentSize.height {
+
+        if currentWidth > maxDimension || currentHeight > maxDimension {
+            let ratio = currentWidth / currentHeight
+            if currentWidth > currentHeight {
                 newSize = CGSize(width: maxDimension, height: maxDimension / ratio)
-                scaleFactor = maxDimension / currentSize.width
+                scaleFactor = maxDimension / currentWidth
             } else {
                 newSize = CGSize(width: maxDimension * ratio, height: maxDimension)
-                scaleFactor = maxDimension / currentSize.height
+                scaleFactor = maxDimension / currentHeight
             }
         }
 
-        // Create compressed image
-        let newImage = NSImage(size: newSize)
-        newImage.lockFocus()
-        image.draw(in: NSRect(origin: .zero, size: newSize))
+        // Create bitmap context for fast rendering
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+
+        guard let context = CGContext(
+            data: nil,
+            width: Int(newSize.width),
+            height: Int(newSize.height),
+            bitsPerComponent: 8,
+            bytesPerRow: Int(newSize.width) * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo.rawValue
+        ) else {
+            return nil
+        }
+
+        // Set high-quality interpolation for resizing
+        context.interpolationQuality = .high
+
+        // Draw resized image
+        context.draw(cgImage, in: CGRect(origin: .zero, size: newSize))
 
         // Draw click marker if position is provided
         if let clickPosition = clickPosition {
-            guard let context = NSGraphicsContext.current?.cgContext else {
-                newImage.unlockFocus()
-                return nil
-            }
-
-            // Scale click position to match new image size
             let scaledPoint = CGPoint(x: clickPosition.x * scaleFactor, y: clickPosition.y * scaleFactor)
 
-            // Draw red circle and cross
             context.setStrokeColor(NSColor.red.cgColor)
             context.setLineWidth(3.0)
 
@@ -62,13 +78,17 @@ class AnalyticsService: ObservableObject {
             context.strokePath()
         }
 
-        newImage.unlockFocus()
+        // Get CGImage from context
+        guard let resultImage = context.makeImage() else {
+            return nil
+        }
 
-        // Convert to JPEG data with 70% quality for better compression
-        guard let tiffData = newImage.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiffData),
-              let jpegData = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.7]) else {
-            return imageData // Return original if compression fails
+        // Convert to JPEG with optimized settings (60% quality for better compression/speed tradeoff)
+        let bitmapRep = NSBitmapImageRep(cgImage: resultImage)
+        bitmapRep.size = newSize
+
+        guard let jpegData = bitmapRep.representation(using: .jpeg, properties: [.compressionFactor: 0.6]) else {
+            return nil
         }
 
         return jpegData

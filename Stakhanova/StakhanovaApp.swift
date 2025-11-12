@@ -7,11 +7,8 @@ struct StakhanovaApp: App {
 
     var body: some Scene {
         // Menu bar only app - no main window
-        WindowGroup {
+        Settings {
             EmptyView()
-        }
-        .commands {
-            CommandGroup(replacing: .newItem) { }
         }
     }
 }

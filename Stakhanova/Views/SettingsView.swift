@@ -10,6 +10,8 @@ struct SettingsView: View {
     @State private var sendAllScreenshots: Bool = false
     @State private var reasoningEffort: String = "minimal"
     @State private var addClickMarker: Bool = true
+    @State private var apiKeyVisible: Bool = false
+    @State private var suppressApiKeySave: Bool = false
 
     // Analytics state
     @State private var sessions: [SessionInfo] = []
@@ -25,11 +27,52 @@ struct SettingsView: View {
     @State private var showZoomWindow = false
     @State private var analysisLogs: [String] = []
 
+    // Sidebar navigation
+    private enum SidebarItem: CaseIterable { case dashboard, settings, about }
+    @State private var selectedItem: SidebarItem = .dashboard
+
     var body: some View {
-        TabView {
-            analyticsTab
-            settingsTab
-            aboutTab
+        HStack(spacing: 0) {
+            // Left Sidebar
+            VStack(spacing: 8) {
+                sidebarButton(icon: "chart.bar", title: "Dashboard", isSelected: selectedItem == .dashboard) {
+                    selectedItem = .dashboard
+                }
+                sidebarButton(icon: "gearshape", title: "Settings", isSelected: selectedItem == .settings) {
+                    selectedItem = .settings
+                }
+                sidebarButton(icon: "info.circle", title: "About", isSelected: selectedItem == .about) {
+                    selectedItem = .about
+                }
+
+                Spacer()
+            }
+            .padding(12)
+            .frame(width: 120)
+            .background(.ultraThinMaterial)
+
+            Divider()
+
+            // Main content area
+            ZStack {
+                switch selectedItem {
+                case .dashboard:
+                    topCentered(maxContentWidth: 1200) { analyticsTab }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(nsColor: .windowBackgroundColor))
+                case .settings:
+                    topCentered(maxContentWidth: 900) { settingsTab }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(nsColor: .windowBackgroundColor))
+                case .about:
+                    topCentered(maxContentWidth: 900) { aboutTab }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(nsColor: .windowBackgroundColor))
+                }
+            }
         }
         .frame(minWidth: 1200, minHeight: 800)
         .onAppear {
@@ -49,15 +92,48 @@ struct SettingsView: View {
         }
     }
 
+    // Sidebar button helper
+    private func sidebarButton(icon: String, title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .regular))
+                Text(title)
+                    .font(.caption)
+            }
+            .foregroundColor(isSelected ? .accentColor : .primary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? Color.accentColor.opacity(0.12) : .clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .help(title)
+    }
+
+    // Top-centered layout helper
+    @ViewBuilder
+    private func topCentered<Content: View>(maxContentWidth: CGFloat = 900, @ViewBuilder content: () -> Content) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                content()
+                    .frame(maxWidth: maxContentWidth, alignment: .top)
+                    .padding(.top, 12)
+                Spacer(minLength: 0)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
     private var analyticsTab: some View {
         VStack(spacing: 0) {
                 // Session selector - at the very top
                 HStack {
-                    Text("Session:")
-                        .font(.headline)
-
                     Picker("Select Session", selection: $selectedSession) {
-                        Text("Select a session to begin").tag(nil as SessionInfo?)
+                        Text("Select a session to begin").tag(nil as SessionInfo?).font(.headline)
                         ForEach(sessions) { session in
                             Text(session.displayName).tag(session as SessionInfo?)
                         }
@@ -100,8 +176,10 @@ struct SettingsView: View {
                                             .frame(maxHeight: 150)
                                             .cornerRadius(8)
                                             .onTapGesture {
-                                                zoomedImage = beforeImage
-                                                showZoomWindow = true
+                                                if beforeImage.size.width > 0 && beforeImage.size.height > 0 {
+                                                    zoomedImage = beforeImage
+                                                    showZoomWindow = true
+                                                }
                                             }
                                             .help("Click to zoom")
                                     } else {
@@ -125,8 +203,10 @@ struct SettingsView: View {
                                             .frame(maxHeight: 150)
                                             .cornerRadius(8)
                                             .onTapGesture {
-                                                zoomedImage = afterImage
-                                                showZoomWindow = true
+                                                if afterImage.size.width > 0 && afterImage.size.height > 0 {
+                                                    zoomedImage = afterImage
+                                                    showZoomWindow = true
+                                                }
                                             }
                                             .help("Click to zoom")
                                     } else {
@@ -303,17 +383,43 @@ struct SettingsView: View {
                 // Run Analysis button with provider/model info
                 VStack(spacing: 8) {
                     Button(action: runAnalysis) {
-                        HStack {
+                        HStack(spacing: 8) {
                             if isAnalyzing {
                                 ProgressView()
-                                    .scaleEffect(0.8)
+                                    .progressViewStyle(CircularProgressViewStyle())
+                                    .scaleEffect(0.9)
+                            } else {
+                                Image(systemName: "wand.and.stars")
+                                    .imageScale(.medium)
+                                    .transition(.opacity)
                             }
                             Text(isAnalyzing ? "Analyzing..." : "Run Analysis")
+                                .fontWeight(.semibold)
+                                .textCase(.none)
                         }
-                        .frame(width: 200)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 12)
+                        .frame(minWidth: 220)
+                        .background(
+                            LinearGradient(
+                                colors: [Color.accentColor, Color.purple.opacity(0.9)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
+                        .shadow(color: Color.accentColor.opacity(0.25), radius: 10, x: 0, y: 6)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                        )
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.plain)
                     .disabled(selectedSession == nil || isAnalyzing)
+                    .opacity((selectedSession == nil || isAnalyzing) ? 0.6 : 1.0)
+                    .animation(.easeInOut(duration: 0.2), value: isAnalyzing)
+                    .padding(.top, 10)
 
                     // Show current provider and model
                     HStack(spacing: 4) {
@@ -456,7 +562,7 @@ struct SettingsView: View {
                                 AxisMarks(values: .automatic) { value in
                                     AxisValueLabel {
                                         if let minutes = value.as(Double.self) {
-                                            Text(String(format: "%.1f", minutes))
+                                            Text(String(format: "%.2f", minutes))
                                         }
                                     }
                                     AxisGridLine()
@@ -477,7 +583,7 @@ struct SettingsView: View {
                                         Text(entry.appName)
                                             .font(.body)
                                         Spacer()
-                                        Text(String(format: "%.1f min", entry.minutesUsed))
+                                        Text(String(format: "%.2f min", entry.minutesUsed))
                                             .font(.body)
                                             .foregroundColor(.secondary)
                                     }
@@ -498,9 +604,6 @@ struct SettingsView: View {
                 }
             }
             .padding()
-            .tabItem {
-                Label("Analytics", systemImage: "chart.bar")
-            }
     }
 
     private var settingsTab: some View {
@@ -522,17 +625,59 @@ struct SettingsView: View {
                         loadSettings()
                     }
 
-                    SecureField("API Key", text: $apiKey)
-                        .textFieldStyle(.roundedBorder)
-                        .onChange(of: apiKey) { oldValue, newValue in
-                            // Don't save if it's just the masked .env token (contains asterisks)
-                            if !newValue.contains("*") {
-                                // Auto-save when user types a custom API key
-                                analyticsService.apiKey = newValue.isEmpty ? nil : newValue
+                    HStack(spacing: 8) {
+                        Group {
+                            if apiKeyVisible {
+                                TextField("API Key", text: $apiKey)
+                            } else {
+                                SecureField("API Key", text: $apiKey)
                             }
                         }
+                        .textFieldStyle(.roundedBorder)
 
-                    // Show .env status
+                        Button(action: {
+                            apiKeyVisible.toggle()
+                            // Update field contents to match visibility without saving
+                            suppressApiKeySave = true
+                            let actualApiKey: String? = {
+                                if let userKey = analyticsService.apiKey, !userKey.isEmpty { return userKey }
+                                switch selectedProvider {
+                                case .openai: return EnvLoader.shared.get("OPENAI_API_KEY")
+                                case .huggingface: return EnvLoader.shared.get("HF_TOKEN")
+                                }
+                            }()
+                            if apiKeyVisible {
+                                // Reveal the full key
+                                apiKey = actualApiKey ?? ""
+                            } else {
+                                // Restore masked view if we have a key
+                                if let key = actualApiKey, !key.isEmpty {
+                                    let visibleChars = min(4, key.count)
+                                    apiKey = String(key.prefix(visibleChars)) + String(repeating: "*", count: 10)
+                                } else {
+                                    apiKey = ""
+                                }
+                            }
+                        }) {
+                            Image(systemName: apiKeyVisible ? "eye.slash" : "eye")
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help(apiKeyVisible ? "Hide API Key" : "Show API Key")
+                    }
+                    .onChange(of: apiKey) { oldValue, newValue in
+                        if suppressApiKeySave {
+                            suppressApiKeySave = false
+                            return
+                        }
+                        // Don't save if it's just the masked .env token (contains asterisks)
+                        if !newValue.contains("*") {
+                            // Auto-save when user types a custom API key
+                            analyticsService.apiKey = newValue.isEmpty ? nil : newValue
+                        }
+                    }
+
+                    // Show .env status (derive from saved state, not field text)
                     let envKey: String? = {
                         switch selectedProvider {
                         case .openai:
@@ -542,9 +687,12 @@ struct SettingsView: View {
                         }
                     }()
                     let envKeyName = selectedProvider == .openai ? "OPENAI_API_KEY" : "HF_TOKEN"
-                    let usingEnvToken = (apiKey.isEmpty || apiKey.contains("*")) && envKey != nil
 
-                    if usingEnvToken {
+                    if let userKey = analyticsService.apiKey, !userKey.isEmpty {
+                        Text("Using custom API key (overrides .env)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else if let envKey, !envKey.isEmpty {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.green)
@@ -552,14 +700,10 @@ struct SettingsView: View {
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
-                    } else if apiKey.isEmpty {
+                    } else {
                         Text("No \(envKeyName) found in .env file")
                             .font(.caption)
                             .foregroundColor(.orange)
-                    } else if !apiKey.contains("*") {
-                        Text("Using custom API key (overrides .env)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
                     }
 
                     if let model = selectedModel {
@@ -632,9 +776,6 @@ struct SettingsView: View {
 
             }
             .padding()
-            .tabItem {
-                Label("Settings", systemImage: "gear")
-            }
     }
 
     private var aboutTab: some View {
@@ -673,9 +814,6 @@ struct SettingsView: View {
                 }
             }
             .padding()
-            .tabItem {
-                Label("About", systemImage: "info.circle")
-            }
     }
 
     private func loadSettings() {
@@ -922,19 +1060,25 @@ struct ZoomImageView: View {
     var body: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
-                // Close button
+                // Close button bar
                 HStack {
+                    Text("Image Zoom")
+                        .font(.headline)
                     Spacer()
                     Button(action: {
                         isPresented = false
                     }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title)
-                            .foregroundColor(.secondary)
+                        HStack(spacing: 4) {
+                            Image(systemName: "xmark.circle.fill")
+                            Text("Close")
+                        }
+                        .font(.body)
+                        .foregroundColor(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .padding()
+                    .keyboardShortcut(.escape, modifiers: [])
                 }
+                .padding()
                 .background(Color(NSColor.windowBackgroundColor))
 
                 // Image viewer
